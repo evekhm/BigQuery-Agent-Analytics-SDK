@@ -1,7 +1,7 @@
 # BigQuery Agent Analytics SDK
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13-blue)](pyproject.toml)
+[![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13%20|%203.14-blue)](pyproject.toml)
 [![CI](https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK/actions/workflows/ci.yml/badge.svg)](https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK/actions/workflows/ci.yml)
 
 An open-source Python SDK for analyzing, evaluating, and curating agent traces
