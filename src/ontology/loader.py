@@ -14,8 +14,8 @@
 
 """Loader and validator for v0 ontology YAML.
 
-Implements the validation rules in §10 of ``docs/ontology/ontology.md``. Pydantic
-covers shape (required fields, enum membership, unknown keys);
+Implements the validation rules described in ``docs/ontology/ontology.md``.
+Pydantic covers shape (required fields, enum membership, unknown keys);
 ``_validate_ontology`` covers cross-element semantics (uniqueness,
 inheritance cycles, key references, covariant narrowing, key-mode rules).
 """
@@ -23,12 +23,24 @@ inheritance cycles, key references, covariant narrowing, key-mode rules).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, TypeVar, Union
 
 import yaml
 
-from .models import Entity, Keys, Ontology, Relationship
+from .models import Entity
+from .models import Keys
+from .models import Ontology
+from .models import Property
+from .models import Relationship
 
+# The semantic-validation helpers walk ``extends`` chains over either Entity or
+# Relationship — both expose ``name``, ``extends``, ``properties``, and
+# (optionally) ``keys``. ``GraphElement`` names that shared shape (an
+# entity is a node type; a relationship is an edge type); the
+# TypeVar lets per-kind helpers preserve the concrete type in their
+# return annotations (``dict[str, Entity]`` vs ``dict[str, Relationship]``).
+GraphElement = Union[Entity, Relationship]
+GraphElementT = TypeVar("GraphElementT", Entity, Relationship)
 
 # --------------------------------------------------------------------- #
 # Public entry points                                                    #
@@ -45,7 +57,7 @@ def load_ontology_from_string(yaml_string: str) -> Ontology:
   """Parse and validate an ontology from a YAML string.
 
   Raises:
-      ValueError: On any §10 validation failure.
+      ValueError: On any semantic validation failure.
       pydantic.ValidationError: On shape failures (unknown keys, bad enums).
       yaml.YAMLError: On malformed YAML.
   """
@@ -63,16 +75,14 @@ def load_ontology_from_string(yaml_string: str) -> Ontology:
 
 
 def _validate_ontology(ont: Ontology) -> None:
-  """Run §10 validation rules over a parsed ontology."""
+  """Run cross-element semantic validation over a parsed ontology."""
   entity_map = _check_unique_names(ont.entities, "entity")
   rel_map = _check_unique_names(ont.relationships, "relationship")
 
   for ent in ont.entities:
     _check_property_names_unique(ent.properties, f"entity {ent.name!r}")
   for rel in ont.relationships:
-    _check_property_names_unique(
-        rel.properties, f"relationship {rel.name!r}"
-    )
+    _check_property_names_unique(rel.properties, f"relationship {rel.name!r}")
 
   _check_extends_targets(ont.entities, entity_map, "entity")
   _check_extends_targets(ont.relationships, rel_map, "relationship")
@@ -80,9 +90,7 @@ def _validate_ontology(ont: Ontology) -> None:
   _check_no_extends_cycles(ont.relationships, "relationship")
 
   _check_no_property_redeclaration(ont.entities, entity_map, "entity")
-  _check_no_property_redeclaration(
-      ont.relationships, rel_map, "relationship"
-  )
+  _check_no_property_redeclaration(ont.relationships, rel_map, "relationship")
   _check_no_key_redeclaration(ont.entities, entity_map, "entity")
   _check_no_key_redeclaration(ont.relationships, rel_map, "relationship")
 
@@ -99,9 +107,11 @@ def _validate_ontology(ont: Ontology) -> None:
 # --------------------------------------------------------------------- #
 
 
-def _check_unique_names(items, kind: str) -> dict:
-  """Rule 1: names unique within their kind."""
-  out: dict = {}
+def _check_unique_names(
+    items: Iterable[GraphElementT], kind: str
+) -> dict[str, GraphElementT]:
+  """Names must be unique within their kind."""
+  out: dict[str, GraphElementT] = {}
   for item in items:
     if item.name in out:
       raise ValueError(f"Duplicate {kind} name: {item.name!r}")
@@ -109,19 +119,23 @@ def _check_unique_names(items, kind: str) -> dict:
   return out
 
 
-def _check_property_names_unique(properties, owner: str) -> None:
-  """Rule 2: property names unique within their owner."""
+def _check_property_names_unique(
+    properties: Iterable[Property], owner: str
+) -> None:
+  """Property names must be unique within their owner."""
   seen: set[str] = set()
   for prop in properties:
     if prop.name in seen:
-      raise ValueError(
-          f"Duplicate property name {prop.name!r} on {owner}."
-      )
+      raise ValueError(f"Duplicate property name {prop.name!r} on {owner}.")
     seen.add(prop.name)
 
 
-def _check_extends_targets(items, item_map: dict, kind: str) -> None:
-  """Rule 3: ``extends`` resolves to a same-kind declared element."""
+def _check_extends_targets(
+    items: Iterable[GraphElement],
+    item_map: dict[str, GraphElementT],
+    kind: str,
+) -> None:
+  """``extends`` must resolve to a same-kind declared element."""
   for item in items:
     if item.extends is not None and item.extends not in item_map:
       raise ValueError(
@@ -130,8 +144,8 @@ def _check_extends_targets(items, item_map: dict, kind: str) -> None:
       )
 
 
-def _check_no_extends_cycles(items, kind: str) -> None:
-  """Rule 4: no cycles in ``extends`` chains."""
+def _check_no_extends_cycles(items: Iterable[GraphElement], kind: str) -> None:
+  """``extends`` chains must not contain cycles."""
   parents = {i.name: i.extends for i in items}
   for start in parents:
     seen: set[str] = set()
@@ -143,7 +157,9 @@ def _check_no_extends_cycles(items, kind: str) -> None:
       cur = parents.get(cur)
 
 
-def _ancestors(name: str, item_map: dict) -> Iterable:
+def _ancestors(
+    name: str, item_map: dict[str, GraphElementT]
+) -> Iterable[GraphElementT]:
   """Yield ancestor items (excluding self) walking ``extends``."""
   cur = item_map[name].extends
   while cur is not None:
@@ -152,8 +168,12 @@ def _ancestors(name: str, item_map: dict) -> Iterable:
     cur = parent.extends
 
 
-def _check_no_property_redeclaration(items, item_map: dict, kind: str) -> None:
-  """Rule 5: redeclaring an inherited property by name is an error."""
+def _check_no_property_redeclaration(
+    items: Iterable[GraphElement],
+    item_map: dict[str, GraphElementT],
+    kind: str,
+) -> None:
+  """Redeclaring an inherited property by name is an error."""
   for item in items:
     if item.extends is None:
       continue
@@ -168,8 +188,12 @@ def _check_no_property_redeclaration(items, item_map: dict, kind: str) -> None:
         )
 
 
-def _check_no_key_redeclaration(items, item_map: dict, kind: str) -> None:
-  """Rule 6: redeclaring inherited keys is an error."""
+def _check_no_key_redeclaration(
+    items: Iterable[GraphElement],
+    item_map: dict[str, GraphElementT],
+    kind: str,
+) -> None:
+  """Redeclaring inherited keys is an error."""
   for item in items:
     if item.extends is None:
       continue
@@ -182,16 +206,18 @@ def _check_no_key_redeclaration(items, item_map: dict, kind: str) -> None:
       )
 
 
-def _has_keys(item) -> bool:
+def _has_keys(item: GraphElement) -> bool:
   keys = getattr(item, "keys", None)
   if keys is None:
     return False
   return bool(keys.primary or keys.additional or keys.alternate)
 
 
-def _effective_properties(item, item_map: dict) -> dict:
+def _effective_properties(
+    item: GraphElement, item_map: dict[str, GraphElementT]
+) -> dict[str, Property]:
   """All properties visible on ``item`` including inherited ones."""
-  out: dict = {}
+  out: dict[str, Property] = {}
   for ancestor in reversed(list(_ancestors(item.name, item_map))):
     for p in ancestor.properties:
       out[p.name] = p
@@ -200,7 +226,9 @@ def _effective_properties(item, item_map: dict) -> dict:
   return out
 
 
-def _effective_keys(item, item_map: dict) -> Keys | None:
+def _effective_keys(
+    item: GraphElement, item_map: dict[str, GraphElementT]
+) -> Keys | None:
   """Resolve keys, walking up ``extends`` if not declared locally."""
   if _has_keys(item):
     return item.keys
@@ -210,8 +238,10 @@ def _effective_keys(item, item_map: dict) -> Keys | None:
   return None
 
 
-def _check_key_columns_known(keys: Keys, props: dict, owner: str) -> None:
-  """Rule 7: every key column references a declared property."""
+def _check_key_columns_known(
+    keys: Keys, props: dict[str, Property], owner: str
+) -> None:
+  """Every key column must reference a declared property."""
   groups: list[list[str]] = []
   if keys.primary:
     groups.append(keys.primary)
@@ -228,22 +258,18 @@ def _check_key_columns_known(keys: Keys, props: dict, owner: str) -> None:
 
 
 def _check_alternate_keys(keys: Keys, owner: str) -> None:
-  """Rule 8: alternate keys are non-empty and non-duplicating."""
+  """Alternate keys must be non-empty and not duplicate another key."""
   if not keys.alternate:
     return
   if keys.primary is None:
-    raise ValueError(
-        f"{owner}: alternate keys require a primary key."
-    )
+    raise ValueError(f"{owner}: alternate keys require a primary key.")
   primary_set = frozenset(keys.primary)
   seen: set[frozenset] = {primary_set}
   for alt in keys.alternate:
     if not alt:
       raise ValueError(f"{owner}: alternate key must be non-empty.")
     if len(set(alt)) != len(alt):
-      raise ValueError(
-          f"{owner}: alternate key {alt!r} has duplicate columns."
-      )
+      raise ValueError(f"{owner}: alternate key {alt!r} has duplicate columns.")
     sig = frozenset(alt)
     if sig in seen:
       raise ValueError(
@@ -252,24 +278,24 @@ def _check_alternate_keys(keys: Keys, owner: str) -> None:
     seen.add(sig)
 
 
-def _check_entity_keys(entity: Entity, entity_map: dict) -> None:
-  """Rules 7, 8, 9, 11 for entities."""
+def _check_entity_keys(entity: Entity, entity_map: dict[str, Entity]) -> None:
+  """Validate entity keys: primary required, additional forbidden,
+  columns and alternate-key shape."""
   keys = _effective_keys(entity, entity_map)
   if keys is None or not keys.primary:
-    raise ValueError(
-        f"Entity {entity.name!r}: keys.primary is required."
-    )
+    raise ValueError(f"Entity {entity.name!r}: keys.primary is required.")
   if keys.additional is not None:
-    raise ValueError(
-        f"Entity {entity.name!r}: keys.additional is not allowed."
-    )
+    raise ValueError(f"Entity {entity.name!r}: keys.additional is not allowed.")
   props = _effective_properties(entity, entity_map)
   _check_key_columns_known(keys, props, f"Entity {entity.name!r}")
   _check_alternate_keys(keys, f"Entity {entity.name!r}")
 
 
-def _check_relationship_keys(rel: Relationship, rel_map: dict) -> None:
-  """Rules 7, 8, 9 for relationships."""
+def _check_relationship_keys(
+    rel: Relationship, rel_map: dict[str, Relationship]
+) -> None:
+  """Validate relationship keys: primary XOR additional; columns
+  and alternate-key shape."""
   keys = _effective_keys(rel, rel_map)
   if keys is None:
     return  # no uniqueness constraint; multi-edges permitted.
@@ -279,6 +305,9 @@ def _check_relationship_keys(rel: Relationship, rel_map: dict) -> None:
         f"mutually exclusive."
     )
   if keys.additional is not None and keys.alternate:
+    # Largely overlaps with ``_check_alternate_keys`` (which catches the
+    # "primary missing" case), but emits a relationship-specific message
+    # for the additional+alternate combination instead of the generic one.
     raise ValueError(
         f"Relationship {rel.name!r}: alternate keys require a primary key."
     )
@@ -288,7 +317,7 @@ def _check_relationship_keys(rel: Relationship, rel_map: dict) -> None:
 
 
 def _check_relationship_endpoints(
-    rel: Relationship, entity_map: dict
+    rel: Relationship, entity_map: dict[str, Entity]
 ) -> None:
   """Endpoints must reference declared entities."""
   if rel.from_ not in entity_map:
@@ -302,7 +331,9 @@ def _check_relationship_endpoints(
     )
 
 
-def _is_entity_subtype(child: str, parent: str, entity_map: dict) -> bool:
+def _is_entity_subtype(
+    child: str, parent: str, entity_map: dict[str, Entity]
+) -> bool:
   """True if ``child`` equals ``parent`` or transitively extends it."""
   cur: str | None = child
   while cur is not None:
@@ -313,9 +344,11 @@ def _is_entity_subtype(child: str, parent: str, entity_map: dict) -> bool:
 
 
 def _check_covariant_narrowing(
-    rel: Relationship, rel_map: dict, entity_map: dict
+    rel: Relationship,
+    rel_map: dict[str, Relationship],
+    entity_map: dict[str, Entity],
 ) -> None:
-  """Rule 10: child endpoints must equal or extend the parent's."""
+  """Child relationship endpoints must equal or extend the parent's."""
   if rel.extends is None:
     return
   parent = rel_map[rel.extends]
@@ -328,4 +361,12 @@ def _check_covariant_narrowing(
     raise ValueError(
         f"Relationship {rel.name!r}: to {rel.to!r} does not narrow "
         f"parent to {parent.to!r}."
+    )
+  # Cardinality is inherited unchanged: a child may omit it (and inherit
+  # silently) or restate the parent's value, but cannot redefine it.
+  if rel.cardinality is not None and rel.cardinality != parent.cardinality:
+    raise ValueError(
+        f"Relationship {rel.name!r}: cardinality {rel.cardinality.value!r} "
+        f"differs from inherited parent cardinality "
+        f"{parent.cardinality.value if parent.cardinality else None!r}."
     )

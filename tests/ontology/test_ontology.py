@@ -41,9 +41,7 @@ def _load(yaml_text: str):
 
 def _dump(ont) -> str:
   return json.dumps(
-      ont.model_dump(
-          by_alias=True, exclude_none=True, exclude_defaults=True
-      ),
+      ont.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True),
       indent=2,
       sort_keys=False,
   )
@@ -66,7 +64,8 @@ def test_minimal_ontology_round_trips_to_exact_json():
           - name: id
             type: string
   """
-  expected_json = textwrap.dedent("""\
+  expected_json = textwrap.dedent(
+      """\
     {
       "ontology": "tiny",
       "entities": [
@@ -85,7 +84,8 @@ def test_minimal_ontology_round_trips_to_exact_json():
           ]
         }
       ]
-    }""")
+    }"""
+  )
 
   assert _dump(_load(yaml_input)) == expected_json
 
@@ -180,7 +180,8 @@ def test_finance_spec_example_round_trips_to_exact_json():
     synonyms:
       - finance-core
   """
-  expected_json = textwrap.dedent("""\
+  expected_json = textwrap.dedent(
+      """\
     {
       "ontology": "finance",
       "version": "0.1",
@@ -325,7 +326,8 @@ def test_finance_spec_example_round_trips_to_exact_json():
       "synonyms": [
         "finance-core"
       ]
-    }""")
+    }"""
+  )
 
   assert _dump(_load(yaml_input)) == expected_json
 
@@ -351,7 +353,8 @@ def test_alternate_keys_round_trip():
           - name: external_id
             type: string
   """
-  expected_json = textwrap.dedent("""\
+  expected_json = textwrap.dedent(
+      """\
     {
       "ontology": "alts",
       "entities": [
@@ -391,7 +394,8 @@ def test_alternate_keys_round_trip():
           ]
         }
       ]
-    }""")
+    }"""
+  )
 
   assert _dump(_load(yaml_input)) == expected_json
 
@@ -476,9 +480,7 @@ def test_duplicate_property_name_is_error():
           - name: id
             type: string
   """
-  _assert_value_error(
-      yaml_input, "Duplicate property name 'id' on entity 'A'."
-  )
+  _assert_value_error(yaml_input, "Duplicate property name 'id' on entity 'A'.")
 
 
 def test_extends_unknown_entity_is_error():
@@ -546,9 +548,7 @@ def test_redeclaring_inherited_keys_is_error():
         extends: Parent
         keys: {primary: [id]}
   """
-  _assert_value_error(
-      yaml_input, "Entity 'Child' redeclares inherited keys."
-  )
+  _assert_value_error(yaml_input, "Entity 'Child' redeclares inherited keys.")
 
 
 def test_key_column_must_be_a_property():
@@ -597,9 +597,7 @@ def test_entity_additional_keys_forbidden():
           - name: id
             type: string
   """
-  _assert_value_error(
-      yaml_input, "Entity 'A': keys.primary is required."
-  )
+  _assert_value_error(yaml_input, "Entity 'A': keys.primary is required.")
 
 
 def test_relationship_primary_and_additional_mutually_exclusive():
@@ -702,3 +700,68 @@ def test_unknown_property_type_is_error():
   with pytest.raises(Exception) as exc_info:
     _load(yaml_input)
   assert "uuid" in str(exc_info.value)
+
+
+def test_empty_primary_key_list_is_error():
+  yaml_input = """
+    ontology: bad
+    entities:
+      - name: A
+        keys: {primary: []}
+        properties: [{name: id, type: string}]
+  """
+  with pytest.raises(Exception) as exc_info:
+    _load(yaml_input)
+  msg = str(exc_info.value).lower()
+  assert "primary" in msg and (
+      "at least 1" in msg or "min_length" in msg or "too_short" in msg
+  )
+
+
+def test_relationship_cardinality_must_match_parent():
+  yaml_input = """
+    ontology: bad
+    entities:
+      - name: A
+        keys: {primary: [id]}
+        properties: [{name: id, type: string}]
+      - name: B
+        keys: {primary: [id]}
+        properties: [{name: id, type: string}]
+    relationships:
+      - name: parent_rel
+        from: A
+        to: B
+        cardinality: many_to_many
+      - name: child_rel
+        extends: parent_rel
+        from: A
+        to: B
+        cardinality: one_to_one
+  """
+  with pytest.raises(ValueError, match="cardinality"):
+    _load(yaml_input)
+
+
+def test_relationship_child_may_omit_cardinality():
+  yaml_input = """
+    ontology: ok
+    entities:
+      - name: A
+        keys: {primary: [id]}
+        properties: [{name: id, type: string}]
+      - name: B
+        keys: {primary: [id]}
+        properties: [{name: id, type: string}]
+    relationships:
+      - name: parent_rel
+        from: A
+        to: B
+        cardinality: many_to_many
+      - name: child_rel
+        extends: parent_rel
+        from: A
+        to: B
+  """
+  # Should validate: child inherits parent cardinality silently.
+  _load(yaml_input)

@@ -19,6 +19,8 @@ backend-neutral ontology described in YAML, with entities, relationships,
 properties, keys, and single-parent inheritance.
 """
 
+from .loader import load_ontology
+from .loader import load_ontology_from_string
 from .models import Cardinality
 from .models import Entity
 from .models import Keys
@@ -26,8 +28,6 @@ from .models import Ontology
 from .models import Property
 from .models import PropertyType
 from .models import Relationship
-from .loader import load_ontology
-from .loader import load_ontology_from_string
 
 __all__ = [
     "Cardinality",

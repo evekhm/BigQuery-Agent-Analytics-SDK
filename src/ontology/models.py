@@ -12,23 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Pydantic models for the v0 ontology spec.
-"""
+"""Pydantic models for the v0 ontology spec."""
 
 from __future__ import annotations
 
 from enum import Enum
 from typing import Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
-
+from pydantic import BaseModel
+from pydantic import ConfigDict
+from pydantic import Field
 
 # Free-form annotation values: a string or a list of strings.
 AnnotationValue = Union[str, list[str]]
 
 
 class PropertyType(str, Enum):
-  """Semantic property types (§7).
+  """Semantic property types.
 
   Map to GoogleSQL types shared by BigQuery and Spanner. Backend-specific
   unsupported combinations are deferred to binding/compile time.
@@ -83,9 +83,12 @@ class Keys(BaseModel):
 
   model_config = ConfigDict(extra="forbid")
 
-  primary: Optional[list[str]] = None
-  alternate: Optional[list[list[str]]] = None
-  additional: Optional[list[str]] = None
+  # ``min_length=1`` rejects ``primary: []`` / ``additional: []`` /
+  # ``alternate: []`` at parse time so the loader never has to interpret
+  # an empty list as "no key declared".
+  primary: Optional[list[str]] = Field(default=None, min_length=1)
+  alternate: Optional[list[list[str]]] = Field(default=None, min_length=1)
+  additional: Optional[list[str]] = Field(default=None, min_length=1)
 
 
 class Entity(BaseModel):
@@ -96,8 +99,8 @@ class Entity(BaseModel):
   name: str
   extends: Optional[str] = None
   # Optional at the model level: a child entity inherits its parent's keys
-  # and is forbidden from redeclaring them (§9, §10 rule 6). The loader
-  # enforces that every entity has effective ``keys.primary``.
+  # and is forbidden from redeclaring them. The loader enforces that
+  # every entity has effective ``keys.primary``.
   keys: Optional[Keys] = None
   properties: list[Property] = Field(default_factory=list)
   description: Optional[str] = None
@@ -108,7 +111,7 @@ class Entity(BaseModel):
 class Relationship(BaseModel):
   """Relationship (edge type) definition."""
 
-  model_config = ConfigDict(extra="forbid")
+  model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
   name: str
   extends: Optional[str] = None
@@ -120,8 +123,6 @@ class Relationship(BaseModel):
   description: Optional[str] = None
   synonyms: Optional[list[str]] = None
   annotations: Optional[dict[str, AnnotationValue]] = None
-
-  model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class Ontology(BaseModel):
