@@ -9,10 +9,6 @@ Excludes: ontology/binding contract migration (`docs/ontology/*.md`),
 Spanner backend, BKA runtime, and MAKO synchronization. Those are
 follow-up epics listed in Part III.
 
-Target: April 15, 2026 working session (Haiyuan, Pufan, Mikul, Umang).
-
-Tracking: [haiyuan-eng-google/BigQuery-Agent-Analytics-SDK#83](https://github.com/haiyuan-eng-google/BigQuery-Agent-Analytics-SDK/issues/83)
-
 ---
 
 ## Part I: Current State Analysis
