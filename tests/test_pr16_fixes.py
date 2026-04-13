@@ -33,6 +33,7 @@ Covers:
 """
 
 import asyncio
+import inspect
 from datetime import datetime
 from datetime import timezone
 from unittest.mock import MagicMock
@@ -651,15 +652,15 @@ class TestAsyncAPIs:
 
   def test_insights_async_exists(self):
     assert hasattr(Client, "insights_async")
-    assert asyncio.iscoroutinefunction(Client.insights_async)
+    assert inspect.iscoroutinefunction(Client.insights_async)
 
   def test_drift_detection_async_exists(self):
     assert hasattr(Client, "drift_detection_async")
-    assert asyncio.iscoroutinefunction(Client.drift_detection_async)
+    assert inspect.iscoroutinefunction(Client.drift_detection_async)
 
   def test_deep_analysis_async_exists(self):
     assert hasattr(Client, "deep_analysis_async")
-    assert asyncio.iscoroutinefunction(Client.deep_analysis_async)
+    assert inspect.iscoroutinefunction(Client.deep_analysis_async)
 
 
 # ================================================================== #
