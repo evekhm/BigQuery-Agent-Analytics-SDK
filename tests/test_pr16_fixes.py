@@ -33,9 +33,9 @@ Covers:
 """
 
 import asyncio
-import inspect
 from datetime import datetime
 from datetime import timezone
+import inspect
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
