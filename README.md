@@ -152,8 +152,6 @@ src/bigquery_agent_analytics/
 
 - [Google ADK](https://github.com/google/adk-python) — Agent Development Kit
   for building AI agents
-- [ADK BigQuery Trace Exporter](https://github.com/google/adk-python/tree/main/contributing/extensions/bigquery_trace_exporter) —
-  ADK plugin that writes agent traces to BigQuery
 - [BigQuery](https://cloud.google.com/bigquery) — Google Cloud analytics data
   warehouse
 - [BigQuery AI Functions](https://cloud.google.com/bigquery/docs/ai-application-overview) —
