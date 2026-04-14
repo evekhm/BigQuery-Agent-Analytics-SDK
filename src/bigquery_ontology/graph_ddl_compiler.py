@@ -57,15 +57,15 @@ from .binding_models import Binding
 from .binding_models import EntityBinding
 from .binding_models import PropertyBinding
 from .binding_models import RelationshipBinding
-from .ontology_models import Entity
-from .ontology_models import Ontology
-from .ontology_models import Property
-from .ontology_models import Relationship
 from .graph_ddl_models import ResolvedEdgeTable
 from .graph_ddl_models import ResolvedGraph
 from .graph_ddl_models import ResolvedLabelAndProperties
 from .graph_ddl_models import ResolvedNodeTable
 from .graph_ddl_models import ResolvedProperty
+from .ontology_models import Entity
+from .ontology_models import Ontology
+from .ontology_models import Property
+from .ontology_models import Relationship
 
 # --------------------------------------------------------------------- #
 # Public entry point                                                    #
