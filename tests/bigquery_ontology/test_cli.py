@@ -538,9 +538,7 @@ def test_compile_binding_with_output_flag_writes_file_and_no_stdout(tmp_path):
   binding = _write(tmp_path, "tiny.binding.yaml", _COMPILE_BINDING)
   out_path = tmp_path / "out.sql"
 
-  result = _RUNNER.invoke(
-      app, ["compile", str(binding), "-o", str(out_path)]
-  )
+  result = _RUNNER.invoke(app, ["compile", str(binding), "-o", str(out_path)])
 
   assert result.exit_code == 0
   assert result.output == ""
@@ -743,9 +741,7 @@ def test_compile_output_to_nonexistent_dir_emits_structured_error(tmp_path):
   binding = _write(tmp_path, "tiny.binding.yaml", _COMPILE_BINDING)
   bad_output = tmp_path / "no" / "such" / "dir" / "out.sql"
 
-  result = _RUNNER.invoke(
-      app, ["compile", str(binding), "-o", str(bad_output)]
-  )
+  result = _RUNNER.invoke(app, ["compile", str(binding), "-o", str(bad_output)])
 
   assert result.exit_code == 1
   assert "cli-output-error" in result.output
