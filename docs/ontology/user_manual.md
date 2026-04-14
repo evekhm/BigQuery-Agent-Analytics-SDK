@@ -1,5 +1,40 @@
 # Ontology User Manual
 
+## Table of Contents
+
+### Part 1: Guide
+- [What Is an Ontology?](#what-is-an-ontology)
+- [Why Use an Ontology?](#why-use-an-ontology)
+- [How This Project Uses Ontologies](#how-this-project-uses-ontologies)
+- [Writing an Ontology](#writing-an-ontology)
+  - [Naming and versioning](#naming-and-versioning)
+  - [Defining entities](#defining-entities)
+  - [Defining relationships](#defining-relationships)
+  - [Property types](#property-types)
+  - [Derived properties](#derived-properties)
+  - [Relationship keys](#relationship-keys)
+  - [Inheritance](#inheritance)
+  - [Metadata](#metadata)
+- [Writing a Binding](#writing-a-binding)
+  - [Structure](#structure)
+  - [Mapping entities](#mapping-entities)
+  - [Mapping relationships](#mapping-relationships)
+- [Validating and Compiling](#validating-and-compiling)
+  - [Validate](#validate)
+  - [Compile](#compile)
+- [End-to-End Walkthrough](#end-to-end-walkthrough)
+
+### Part 2: Reference
+- [Ontology YAML Schema](#ontology-yaml-schema)
+- [Binding YAML Schema](#binding-yaml-schema)
+- [CLI Reference](#cli-reference)
+- [Inheritance Semantics](#inheritance-semantics)
+- [Ontology Validation Rules](#ontology-validation-rules)
+- [Binding Validation Rules](#binding-validation-rules)
+- [Compilation Details](#compilation-details)
+
+---
+
 ## Part 1: Guide
 
 ### What Is an Ontology?
