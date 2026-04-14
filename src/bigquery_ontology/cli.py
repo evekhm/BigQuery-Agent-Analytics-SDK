@@ -398,9 +398,7 @@ def compile_command(
     )
     raise typer.Exit(code=2)
 
-  resolved_ontology = (
-      Path(ontology_path) if ontology_path is not None else None
-  )
+  resolved_ontology = Path(ontology_path) if ontology_path is not None else None
   ontology, binding = _load_ontology_and_binding(
       file_path, ontology_path=resolved_ontology, json_output=json_output
   )
