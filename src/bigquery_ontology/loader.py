@@ -27,11 +27,11 @@ from typing import Iterable, TypeVar, Union
 
 import yaml
 
-from .models import Entity
-from .models import Keys
-from .models import Ontology
-from .models import Property
-from .models import Relationship
+from .ontology_models import Entity
+from .ontology_models import Keys
+from .ontology_models import Ontology
+from .ontology_models import Property
+from .ontology_models import Relationship
 
 # The semantic-validation helpers walk ``extends`` chains over either Entity or
 # Relationship — both expose ``name``, ``extends``, ``properties``, and
