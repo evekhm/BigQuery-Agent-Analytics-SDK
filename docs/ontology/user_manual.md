@@ -218,7 +218,7 @@ target:
   dataset: finance
 ```
 
-The `ontology` field is the ontology's name (not a file path). When loading, the system looks for `finance.ontology.yaml` in the same directory.
+The `ontology` field is the ontology's name (not a file path).
 
 #### Mapping entities
 
@@ -600,7 +600,7 @@ gm validate <file> [--json] [--ontology PATH]
 | `--json` | no | false | Emit structured JSON errors on stderr. |
 | `--ontology PATH` | no | auto | Companion ontology path. Default: `<ontology_name>.ontology.yaml` next to the binding. |
 
-Success: no output, exit 0. Failure: errors on stderr, exit 1 or 2.
+Success: no output, exit 0. See [exit codes](#exit-codes) for failure codes.
 
 #### `gm compile`
 
@@ -660,7 +660,7 @@ Validates both files before compiling. Any validation error prevents DDL output.
 | `compile-validation` | Compile-time validation (e.g. `extends` not supported in v0) |
 | `yaml-parse` | YAML syntax error |
 | `cli-missing-file` | File not found or not readable |
-| `cli-missing-ontology` | Companion ontology not found |
+| `cli-missing-ontology` | Companion ontology not found or not readable |
 | `cli-unknown-kind` | File is neither ontology nor binding |
 | `cli-wrong-kind` | Compile invoked on a non-binding file |
 | `cli-output-error` | Cannot write output file |
@@ -669,7 +669,7 @@ Validates both files before compiling. Any validation error prevents DDL output.
 
 ### Ontology Validation Rules
 
-The ontology loader enforces 13 cross-element semantic rules beyond per-field shape validation:
+The ontology loader enforces 14 cross-element semantic rules beyond per-field shape validation:
 
 1. Entity names are unique within the ontology.
 2. Relationship names are unique within the ontology.
@@ -684,6 +684,7 @@ The ontology loader enforces 13 cross-element semantic rules beyond per-field sh
 11. On entities: `primary` is required (directly or inherited), `additional` is forbidden.
 12. On relationships: `primary` and `additional` are mutually exclusive.
 13. Relationship endpoints must reference declared entities, and child relationships must covariantly narrow parent endpoints.
+14. A child relationship may not redefine the parent's cardinality.
 
 ### Binding Validation Rules
 
