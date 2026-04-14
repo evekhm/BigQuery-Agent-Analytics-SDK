@@ -176,10 +176,11 @@ def _detect_kind(text: str) -> str:
 
 @app.command("validate")
 def validate(
-    # Existence/readability are validated inside the command (not via
-    # ``exists=True``) so that ``--json`` can produce a structured error
-    # instead of falling through to Typer's human usage text.
-    file: Path = typer.Argument(
+    # Type is ``str`` rather than ``Path`` because Typer maps
+    # ``pathlib.Path`` to ``click.Path(readable=True)``, which
+    # pre-validates readability and emits human usage text on failure —
+    # bypassing ``--json`` structured output.
+    file: str = typer.Argument(
         ...,
         help="Path to an ontology or binding YAML file.",
     ),
@@ -188,10 +189,7 @@ def validate(
         "--json",
         help="Emit structured JSON errors on stderr.",
     ),
-    # Type is ``str | None`` rather than ``Path | None`` because Typer
-    # maps ``pathlib.Path`` to ``TyperPath(readable=True)``, which
-    # pre-validates readability and emits human usage text on failure —
-    # bypassing ``--json`` structured output.
+    # Same ``str`` rationale as ``file`` above.
     ontology_path: str | None = typer.Option(
         None,
         "--ontology",
@@ -202,11 +200,12 @@ def validate(
     ),
 ) -> None:
   """Validate a single ontology or binding YAML file."""
-  if not file.exists() or not file.is_file():
+  file_path = Path(file)
+  if not file_path.exists() or not file_path.is_file():
     _emit_errors(
         [
             {
-                "file": str(file),
+                "file": file,
                 "line": 0,
                 "col": 0,
                 "rule": "cli-missing-file",
@@ -217,8 +216,23 @@ def validate(
         as_json=json_output,
     )
     raise typer.Exit(code=2)
+  if not os.access(file_path, os.R_OK):
+    _emit_errors(
+        [
+            {
+                "file": file,
+                "line": 0,
+                "col": 0,
+                "rule": "cli-missing-file",
+                "severity": "error",
+                "message": f"File not readable: {file}",
+            }
+        ],
+        as_json=json_output,
+    )
+    raise typer.Exit(code=2)
 
-  text = file.read_text(encoding="utf-8")
+  text = file_path.read_text(encoding="utf-8")
   try:
     kind = _detect_kind(text)
   except yaml.YAMLError as exc:
@@ -236,7 +250,7 @@ def validate(
         Path(ontology_path) if ontology_path is not None else None
     )
     _validate_binding_file(
-        file, ontology_path=resolved_ontology, json_output=json_output
+        file_path, ontology_path=resolved_ontology, json_output=json_output
     )
     return
 
@@ -280,11 +294,13 @@ def validate(
 
 @app.command("compile")
 def compile_command(
-    file: Path = typer.Argument(
+    # All path params use ``str`` (not ``Path``) so Typer does not
+    # pre-validate readability and bypass ``--json`` structured output.
+    file: str = typer.Argument(
         ...,
         help="Path to a binding YAML file.",
     ),
-    ontology_path: Path = typer.Option(
+    ontology_path: str | None = typer.Option(
         None,
         "--ontology",
         help=(
@@ -292,7 +308,7 @@ def compile_command(
             "<ontology>.ontology.yaml next to the binding."
         ),
     ),
-    output_path: Path = typer.Option(
+    output_path: str | None = typer.Option(
         None,
         "-o",
         "--output",
@@ -317,11 +333,12 @@ def compile_command(
   compiled on their own (they're backend-neutral; they need a
   binding to pick up physical tables and columns).
   """
-  if not file.exists() or not file.is_file():
+  file_path = Path(file)
+  if not file_path.exists() or not file_path.is_file():
     _emit_errors(
         [
             {
-                "file": str(file),
+                "file": file,
                 "line": 0,
                 "col": 0,
                 "rule": "cli-missing-file",
@@ -332,24 +349,33 @@ def compile_command(
         as_json=json_output,
     )
     raise typer.Exit(code=2)
+  if not os.access(file_path, os.R_OK):
+    _emit_errors(
+        [
+            {
+                "file": file,
+                "line": 0,
+                "col": 0,
+                "rule": "cli-missing-file",
+                "severity": "error",
+                "message": f"File not readable: {file}",
+            }
+        ],
+        as_json=json_output,
+    )
+    raise typer.Exit(code=2)
 
-  text = file.read_text(encoding="utf-8")
+  text = file_path.read_text(encoding="utf-8")
   try:
     kind = _detect_kind(text)
   except yaml.YAMLError as exc:
     _emit_errors(
-        _collect_errors(str(file), exc, kind="binding"),
+        _collect_errors(file, exc, kind="binding"),
         as_json=json_output,
     )
     raise typer.Exit(code=1)
 
   if kind != "binding":
-    # Ontology-only compile isn't meaningful (there's no physical
-    # mapping to emit). Reject with a usage-level error instead of
-    # silently falling through to something that can't work. Message
-    # depends on whether we at least recognized the file as an
-    # ontology — if so the user has a clear fix (point at the
-    # binding), otherwise they need to learn the file-kind contract.
     if kind == "ontology":
       message = "gm compile requires a binding file; got an ontology."
     else:
@@ -360,7 +386,7 @@ def compile_command(
     _emit_errors(
         [
             {
-                "file": str(file),
+                "file": file,
                 "line": 0,
                 "col": 0,
                 "rule": "cli-wrong-kind",
@@ -372,20 +398,18 @@ def compile_command(
     )
     raise typer.Exit(code=2)
 
+  resolved_ontology = (
+      Path(ontology_path) if ontology_path is not None else None
+  )
   ontology, binding = _load_ontology_and_binding(
-      file, ontology_path=ontology_path, json_output=json_output
+      file_path, ontology_path=resolved_ontology, json_output=json_output
   )
 
   try:
     ddl = compile_graph(ontology, binding)
   except ValueError as exc:
-    # compile_graph raises ValueError for compile-time rule violations
-    # (extends, derived cycles). Route with a ``compile-validation``
-    # rule so downstream tooling can distinguish these from
-    # binding/ontology loader errors, even though they're all in the
-    # same exit-1 bucket.
     _emit_errors(
-        _collect_errors(str(file), exc, kind="compile"),
+        _collect_errors(file, exc, kind="compile"),
         as_json=json_output,
     )
     raise typer.Exit(code=1)
@@ -393,10 +417,25 @@ def compile_command(
     typer.echo(f"internal error: {exc}", err=True)
     raise typer.Exit(code=3)
 
-  # Write the DDL. The string already ends in ``\n`` so neither branch
-  # adds another one.
   if output_path is not None:
-    output_path.write_text(ddl, encoding="utf-8")
+    resolved_output = Path(output_path)
+    try:
+      resolved_output.write_text(ddl, encoding="utf-8")
+    except (FileNotFoundError, PermissionError) as exc:
+      _emit_errors(
+          [
+              {
+                  "file": str(resolved_output),
+                  "line": 0,
+                  "col": 0,
+                  "rule": "cli-output-error",
+                  "severity": "error",
+                  "message": f"Cannot write output file: {exc}",
+              }
+          ],
+          as_json=json_output,
+      )
+      raise typer.Exit(code=1)
   else:
     typer.echo(ddl, nl=False)
 
@@ -488,7 +527,11 @@ def _load_ontology_and_binding(
     # caller lost the ontology object. Defensive: should not happen.
     raise typer.Exit(code=3)  # pragma: no cover
 
-  if not ontology_path.exists() or not ontology_path.is_file():
+  if (
+      not ontology_path.exists()
+      or not ontology_path.is_file()
+      or not os.access(ontology_path, os.R_OK)
+  ):
     # Auto-discovery and explicit-flag paths get distinct messages —
     # the former explains *why* we looked where we did, the latter
     # simply reports what the user asked us to open.

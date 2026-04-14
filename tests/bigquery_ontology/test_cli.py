@@ -712,6 +712,71 @@ def test_compile_missing_companion_ontology_is_usage_error(tmp_path):
   assert result.output == expected
 
 
+def test_compile_unreadable_file_with_json_emits_structured_json(tmp_path):
+  spec = tmp_path / "locked.binding.yaml"
+  spec.write_text("binding: x\n", encoding="utf-8")
+  spec.chmod(0o000)
+
+  result = _RUNNER.invoke(app, ["compile", str(spec), "--json"])
+
+  assert result.exit_code == 2
+  assert "cli-missing-file" in result.output
+
+
+def test_compile_unreadable_ontology_with_json_emits_structured_json(tmp_path):
+  binding = _write(tmp_path, "tiny.binding.yaml", _COMPILE_BINDING)
+  unreadable = tmp_path / "locked.ontology.yaml"
+  unreadable.write_text("ontology: tiny\n", encoding="utf-8")
+  unreadable.chmod(0o000)
+
+  result = _RUNNER.invoke(
+      app,
+      ["compile", str(binding), "--ontology", str(unreadable), "--json"],
+  )
+
+  assert result.exit_code == 2
+  assert "cli-missing-ontology" in result.output
+
+
+def test_compile_output_to_nonexistent_dir_emits_structured_error(tmp_path):
+  _write(tmp_path, "tiny.ontology.yaml", _COMPILE_ONTOLOGY)
+  binding = _write(tmp_path, "tiny.binding.yaml", _COMPILE_BINDING)
+  bad_output = tmp_path / "no" / "such" / "dir" / "out.sql"
+
+  result = _RUNNER.invoke(
+      app, ["compile", str(binding), "-o", str(bad_output)]
+  )
+
+  assert result.exit_code == 1
+  assert "cli-output-error" in result.output
+
+
+def test_compile_output_to_nonexistent_dir_json_emits_structured_json(
+    tmp_path,
+):
+  _write(tmp_path, "tiny.ontology.yaml", _COMPILE_ONTOLOGY)
+  binding = _write(tmp_path, "tiny.binding.yaml", _COMPILE_BINDING)
+  bad_output = tmp_path / "no" / "such" / "dir" / "out.sql"
+
+  result = _RUNNER.invoke(
+      app, ["compile", str(binding), "-o", str(bad_output), "--json"]
+  )
+
+  assert result.exit_code == 1
+  assert "cli-output-error" in result.output
+
+
+def test_validate_unreadable_file_with_json_emits_structured_json(tmp_path):
+  spec = tmp_path / "locked.ontology.yaml"
+  spec.write_text("ontology: tiny\n", encoding="utf-8")
+  spec.chmod(0o000)
+
+  result = _RUNNER.invoke(app, ["validate", str(spec), "--json"])
+
+  assert result.exit_code == 2
+  assert "cli-missing-file" in result.output
+
+
 def test_validate_missing_file_with_json_emits_structured_json(tmp_path):
   missing = tmp_path / "does-not-exist.ontology.yaml"
 

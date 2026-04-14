@@ -132,9 +132,11 @@ rule as `gm validate` (§4).
 ### Usage
 
 ```
-gm compile <binding> [-o <out>]
+gm compile <binding> [--ontology <path>] [-o <out>]
 ```
 
+- Input must be a binding YAML file. Passing an ontology file (or any
+  other non-binding YAML) exits 2 with `cli-wrong-kind`.
 - Runs validation implicitly on both files before emission. Any error
   fails the compile; no partial DDL is emitted.
 - Writes DDL to stdout unless `-o` is given.
@@ -143,7 +145,8 @@ gm compile <binding> [-o <out>]
 
 | Flag | Purpose |
 |---|---|
-| `-o <file>`, `--out <file>` | Write DDL to file instead of stdout. |
+| `-o <file>`, `--output <file>` | Write DDL to file instead of stdout. |
+| `--ontology <path>` | Path to the companion ontology. Overrides auto-discovery (same as `gm validate`). |
 | `--json` | Structured errors for the implicit validation step. |
 
 On any validation or compilation error, no DDL is emitted — even partially.
