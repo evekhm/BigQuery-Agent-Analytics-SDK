@@ -15,15 +15,23 @@
 """Live BigQuery integration tests for the ontology+binding runtime path.
 
 These tests require:
+  - RUN_LIVE_BIGQUERY_TESTS=1 (explicit opt-in)
   - GOOGLE_CLOUD_PROJECT env var set to a real GCP project
   - BigQuery API enabled with default credentials
   - The ``agent_events`` table with YMGO ADCP session data
 
+Optional env vars:
+  - BQ_LOCATION (default: US) — must match the source dataset's region
+  - BQ_DATASET (default: agent_analytics)
+  - BQ_TABLE (default: agent_events)
+  - BQ_SESSION_ID (default: adcp-033c95d7a97d)
+
 Run explicitly::
 
-    GOOGLE_CLOUD_PROJECT=my-project pytest tests/test_integration_ontology_binding.py -v
+    RUN_LIVE_BIGQUERY_TESTS=1 GOOGLE_CLOUD_PROJECT=my-project \\
+        pytest tests/test_integration_ontology_binding.py -v
 
-Skipped automatically when GOOGLE_CLOUD_PROJECT is not set.
+Skipped automatically without the opt-in flag.
 """
 
 from __future__ import annotations
@@ -33,14 +41,23 @@ import uuid
 
 import pytest
 
+_LIVE = os.environ.get("RUN_LIVE_BIGQUERY_TESTS", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 _PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT")
 _DATASET = os.environ.get("BQ_DATASET", "agent_analytics")
 _TABLE = os.environ.get("BQ_TABLE", "agent_events")
 _SESSION = os.environ.get("BQ_SESSION_ID", "adcp-033c95d7a97d")
+_LOCATION = os.environ.get("BQ_LOCATION", "US")
 
 pytestmark = pytest.mark.skipif(
-    _PROJECT is None or _PROJECT == "your-project-id",
-    reason="GOOGLE_CLOUD_PROJECT not set — skipping live BQ tests",
+    not _LIVE or _PROJECT is None or _PROJECT == "your-project-id",
+    reason=(
+        "Live BQ tests require RUN_LIVE_BIGQUERY_TESTS=1 and "
+        "GOOGLE_CLOUD_PROJECT set"
+    ),
 )
 
 
@@ -51,8 +68,9 @@ def scratch_dataset():
 
   run_id = uuid.uuid4().hex[:8]
   ds_id = f"{_DATASET}_integ_{run_id}"
-  client = bigquery.Client(project=_PROJECT)
+  client = bigquery.Client(project=_PROJECT, location=_LOCATION)
   ds = bigquery.Dataset(f"{_PROJECT}.{ds_id}")
+  ds.location = _LOCATION
   ds.default_table_expiration_ms = 3600000
   client.create_dataset(ds, exists_ok=True)
   yield ds_id
@@ -296,7 +314,7 @@ class TestPropertyGraph:
 
     # Run GQL query.
     gql = compile_showcase_gql(mgr.spec, _PROJECT, scratch_dataset)
-    client = bigquery.Client(project=_PROJECT)
+    client = bigquery.Client(project=_PROJECT, location=_LOCATION)
     job = client.query(
         gql,
         job_config=bigquery.QueryJobConfig(
@@ -409,7 +427,7 @@ class TestLineageEndToEnd:
         dataset_id=scratch_dataset,
         relationship_name="sup_YahooAdUnitEvolvedFrom",
     )
-    client = bigquery.Client(project=_PROJECT)
+    client = bigquery.Client(project=_PROJECT, location=_LOCATION)
     job = client.query(
         lineage_gql,
         job_config=bigquery.QueryJobConfig(
