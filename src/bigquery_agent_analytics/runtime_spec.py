@@ -178,12 +178,18 @@ def _build_property_specs(
   return specs
 
 
-def _build_key_spec(entity: Entity) -> KeySpec:
-  """Extract the primary key from an upstream ``Entity``."""
+def _build_key_spec(
+    entity: Entity,
+    col_map: dict[str, str],
+) -> KeySpec:
+  """Extract the primary key from an upstream ``Entity``.
+
+  Key column names are remapped through ``col_map`` (ontology prop name
+  → physical column name) so they stay consistent with the renamed
+  ``PropertySpec.name`` values produced by ``_build_property_specs``.
+  """
   if entity.keys is not None and entity.keys.primary is not None:
-    return KeySpec(primary=list(entity.keys.primary))
-  # Fallback: should not happen for a validated ontology, but guard
-  # defensively so we don't crash on edge cases.
+    return KeySpec(primary=[col_map.get(k, k) for k in entity.keys.primary])
   raise ValueError(
       f'Entity {entity.name!r} has no primary key defined. '
       'Cannot convert to GraphSpec without a primary key.'
@@ -226,6 +232,9 @@ def graph_spec_from_ontology_binding(
   }
 
   # -- Entities --------------------------------------------------------
+  # Track per-entity column mappings for relationship endpoint remapping.
+  entity_col_maps: dict[str, dict[str, str]] = {}
+
   entity_specs: list[EntitySpec] = []
   for eb in binding.entities:
     ont_entity = ont_entity_map.get(eb.name)
@@ -234,6 +243,12 @@ def graph_spec_from_ontology_binding(
           f'Binding references entity {eb.name!r} which is not '
           f'defined in ontology {ontology.ontology!r}.'
       )
+
+    # Build column map: ontology prop name -> physical column name.
+    col_map: dict[str, str] = {}
+    for bp in eb.properties:
+      col_map[bp.name] = bp.column
+    entity_col_maps[eb.name] = col_map
 
     # Labels: if the entity extends another, labels = [name, extends].
     if ont_entity.extends:
@@ -251,7 +266,7 @@ def graph_spec_from_ontology_binding(
                 from_columns=None,
                 to_columns=None,
             ),
-            keys=_build_key_spec(ont_entity),
+            keys=_build_key_spec(ont_entity, col_map),
             properties=_build_property_specs(
                 ont_entity.properties, eb.properties
             ),

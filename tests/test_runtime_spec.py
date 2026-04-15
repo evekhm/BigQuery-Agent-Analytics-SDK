@@ -158,11 +158,12 @@ class TestOntologyBindingToGraphSpec:
     source = spec.entities[0].binding.source
     assert source == "proj.ds.customers"
 
-  def test_keys_preserved(self):
+  def test_keys_remapped_to_physical_columns(self):
     ontology = self._make_simple_ontology()
     binding = self._make_simple_binding()
     spec = graph_spec_from_ontology_binding(ontology, binding)
-    assert spec.entities[0].keys.primary == ["cid"]
+    # Binding maps cid->customer_id, so key should be physical name.
+    assert spec.entities[0].keys.primary == ["customer_id"]
 
   def test_properties_have_correct_types(self):
     ontology = self._make_simple_ontology()
@@ -172,6 +173,17 @@ class TestOntologyBindingToGraphSpec:
     # Binding maps cid->customer_id, name->display_name.
     assert prop_types["customer_id"] == "string"
     assert prop_types["display_name"] == "string"
+
+  def test_graph_spec_invariant_keys_in_properties(self):
+    """Key columns must exist as declared properties (GraphSpec invariant)."""
+    from bigquery_agent_analytics.ontology_models import _validate_graph_spec
+
+    ontology = self._make_simple_ontology()
+    binding = self._make_simple_binding()
+    spec = graph_spec_from_ontology_binding(ontology, binding)
+    # This must not raise — if keys and properties are inconsistent,
+    # _validate_graph_spec will catch it.
+    _validate_graph_spec(spec)
 
   def test_lineage_config_applied(self):
     ontology = Ontology(
