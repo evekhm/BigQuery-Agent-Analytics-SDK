@@ -394,11 +394,18 @@ class OntologyGraphManager:
     """Create from upstream Ontology + Binding.
 
     Converts the separated ontology/binding pair into a ``GraphSpec``
-    via the runtime adapter, then constructs the manager normally.
+    via the runtime adapter, then constructs the manager.
+
+    Note: ``project_id`` and ``dataset_id`` control where the manager
+    reads telemetry from (``{project}.{dataset}.{table_id}``). This
+    may differ from ``binding.target`` which controls where
+    materialized data is written. For the materializer and compiler,
+    use their ``from_ontology_binding()`` methods which derive
+    project/dataset from the binding target automatically.
 
     Args:
-        project_id: GCP project ID.
-        dataset_id: BigQuery dataset ID.
+        project_id: GCP project where telemetry is stored.
+        dataset_id: BigQuery dataset where telemetry is stored.
         ontology: Upstream Ontology object.
         binding: Upstream Binding object.
         lineage_config: Optional lineage session column config.

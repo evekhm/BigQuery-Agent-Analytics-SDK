@@ -393,8 +393,6 @@ class OntologyMaterializer:
   @classmethod
   def from_ontology_binding(
       cls,
-      project_id: str,
-      dataset_id: str,
       ontology: "Ontology",
       binding: "Binding",
       lineage_config: Optional[dict] = None,
@@ -405,7 +403,11 @@ class OntologyMaterializer:
     """Create from upstream Ontology + Binding.
 
     Converts the separated ontology/binding pair into a ``GraphSpec``
-    via the runtime adapter, then constructs the materializer normally.
+    via the runtime adapter, then constructs the materializer.
+
+    ``project_id`` and ``dataset_id`` are taken from
+    ``binding.target`` so that the materializer's table resolution
+    is always consistent with the binding's source references.
     """
     from .ontology_models import _resolve_inheritance
     from .ontology_models import _validate_graph_spec
@@ -417,8 +419,8 @@ class OntologyMaterializer:
     _resolve_inheritance(spec)
     _validate_graph_spec(spec)
     return cls(
-        project_id=project_id,
-        dataset_id=dataset_id,
+        project_id=binding.target.project,
+        dataset_id=binding.target.dataset,
         spec=spec,
         bq_client=bq_client,
         location=location,

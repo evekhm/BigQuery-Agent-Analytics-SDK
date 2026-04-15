@@ -148,20 +148,27 @@ class TestMaterializerFactory:
     from bigquery_agent_analytics.ontology_materializer import OntologyMaterializer
 
     mat = OntologyMaterializer.from_ontology_binding(
-        project_id="proj",
-        dataset_id="ds",
         ontology=_simple_ontology(),
         binding=_simple_binding(),
     )
     assert isinstance(mat, OntologyMaterializer)
     assert mat.spec.name == "shop"
 
+  def test_project_from_binding_target(self):
+    from bigquery_agent_analytics.ontology_materializer import OntologyMaterializer
+
+    mat = OntologyMaterializer.from_ontology_binding(
+        ontology=_simple_ontology(),
+        binding=_simple_binding(),
+    )
+    # project/dataset come from binding.target, not constructor args.
+    assert mat.project_id == "proj"
+    assert mat.dataset_id == "ds"
+
   def test_write_mode_passed_through(self):
     from bigquery_agent_analytics.ontology_materializer import OntologyMaterializer
 
     mat = OntologyMaterializer.from_ontology_binding(
-        project_id="proj",
-        dataset_id="ds",
         ontology=_simple_ontology(),
         binding=_simple_binding(),
         write_mode="batch_load",
@@ -176,20 +183,19 @@ class TestCompilerFactory:
     from bigquery_agent_analytics.ontology_property_graph import OntologyPropertyGraphCompiler
 
     compiler = OntologyPropertyGraphCompiler.from_ontology_binding(
-        project_id="proj",
-        dataset_id="ds",
         ontology=_simple_ontology(),
         binding=_simple_binding(),
     )
     assert isinstance(compiler, OntologyPropertyGraphCompiler)
     assert compiler.spec.name == "shop"
+    # project/dataset from binding.target.
+    assert compiler.project_id == "proj"
+    assert compiler.dataset_id == "ds"
 
   def test_ddl_generated(self):
     from bigquery_agent_analytics.ontology_property_graph import OntologyPropertyGraphCompiler
 
     compiler = OntologyPropertyGraphCompiler.from_ontology_binding(
-        project_id="proj",
-        dataset_id="ds",
         ontology=_simple_ontology(),
         binding=_simple_binding(),
     )
@@ -212,22 +218,20 @@ class TestEndToEnd:
     ont = _simple_ontology()
     bnd = _simple_binding()
 
+    # Graph manager takes explicit project/dataset for telemetry source.
     mgr = OntologyGraphManager.from_ontology_binding(
         project_id="proj",
         dataset_id="ds",
         ontology=ont,
         binding=bnd,
     )
+    # Materializer and compiler derive project/dataset from binding.
     mat = OntologyMaterializer.from_ontology_binding(
-        project_id="proj",
-        dataset_id="ds",
         ontology=ont,
         binding=bnd,
         write_mode="batch_load",
     )
     compiler = OntologyPropertyGraphCompiler.from_ontology_binding(
-        project_id="proj",
-        dataset_id="ds",
         ontology=ont,
         binding=bnd,
     )
