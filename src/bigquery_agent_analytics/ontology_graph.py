@@ -377,6 +377,61 @@ class OntologyGraphManager:
     self._bq_client = bq_client
     self.extractors = extractors or {}
 
+  @classmethod
+  def from_ontology_binding(
+      cls,
+      project_id: str,
+      dataset_id: str,
+      ontology: "Ontology",
+      binding: "Binding",
+      lineage_config: Optional[dict] = None,
+      table_id: str = "agent_events",
+      endpoint: str = "gemini-2.5-flash",
+      location: Optional[str] = None,
+      bq_client: Optional[bigquery.Client] = None,
+      extractors: Optional[dict[str, StructuredExtractor]] = None,
+  ) -> "OntologyGraphManager":
+    """Create from upstream Ontology + Binding.
+
+    Converts the separated ontology/binding pair into a ``GraphSpec``
+    via the runtime adapter, then constructs the manager normally.
+
+    Args:
+        project_id: GCP project ID.
+        dataset_id: BigQuery dataset ID.
+        ontology: Upstream Ontology object.
+        binding: Upstream Binding object.
+        lineage_config: Optional lineage session column config.
+        table_id: Source telemetry table name.
+        endpoint: AI.GENERATE model endpoint.
+        location: BigQuery location.
+        bq_client: Optional pre-configured BigQuery client.
+        extractors: Optional structured extractor registry.
+
+    Returns:
+        A configured ``OntologyGraphManager``.
+    """
+    from .runtime_spec import graph_spec_from_ontology_binding
+
+    spec = graph_spec_from_ontology_binding(
+        ontology, binding, lineage_config=lineage_config
+    )
+    from .ontology_models import _resolve_inheritance
+    from .ontology_models import _validate_graph_spec
+
+    _resolve_inheritance(spec)
+    _validate_graph_spec(spec)
+    return cls(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        spec=spec,
+        table_id=table_id,
+        endpoint=endpoint,
+        location=location,
+        bq_client=bq_client,
+        extractors=extractors,
+    )
+
   @property
   def bq_client(self) -> bigquery.Client:
     """Lazily initializes the BigQuery client."""

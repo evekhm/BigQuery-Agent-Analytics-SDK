@@ -335,6 +335,39 @@ class OntologyPropertyGraphCompiler:
     self.location = location
     self._bq_client = bq_client
 
+  @classmethod
+  def from_ontology_binding(
+      cls,
+      project_id: str,
+      dataset_id: str,
+      ontology: "Ontology",
+      binding: "Binding",
+      lineage_config: Optional[dict] = None,
+      bq_client: Optional[bigquery.Client] = None,
+      location: Optional[str] = None,
+  ) -> "OntologyPropertyGraphCompiler":
+    """Create from upstream Ontology + Binding.
+
+    Converts the separated ontology/binding pair into a ``GraphSpec``
+    via the runtime adapter, then constructs the compiler normally.
+    """
+    from .ontology_models import _resolve_inheritance
+    from .ontology_models import _validate_graph_spec
+    from .runtime_spec import graph_spec_from_ontology_binding
+
+    spec = graph_spec_from_ontology_binding(
+        ontology, binding, lineage_config=lineage_config
+    )
+    _resolve_inheritance(spec)
+    _validate_graph_spec(spec)
+    return cls(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        spec=spec,
+        bq_client=bq_client,
+        location=location,
+    )
+
   @property
   def bq_client(self) -> bigquery.Client:
     """Lazily initializes the BigQuery client."""
