@@ -291,6 +291,9 @@ If you plan to use `gm import-owl`, install with the OWL extra:
 
 ```bash
 pip install bigquery-agent-analytics[owl]
+
+# or, in editable mode:
+pip install -e '.[owl]'
 ```
 
 ---
