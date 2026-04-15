@@ -433,7 +433,9 @@ def _spec_uses_extends(spec: GraphSpec) -> bool:
 def _spec_uses_lineage_columns(spec: GraphSpec) -> bool:
   """Return True if any relationship uses session column overrides."""
   return any(
-      r.binding.from_session_column is not None for r in spec.relationships
+      r.binding.from_session_column is not None
+      or r.binding.to_session_column is not None
+      for r in spec.relationships
   )
 
 
@@ -469,6 +471,7 @@ def compile_ddl_via_upstream(
           r.name
           for r in spec.relationships
           if r.binding.from_session_column is not None
+          or r.binding.to_session_column is not None
       ]
       reasons.append(
           f"relationships use session column overrides: " f"{rels_with_lineage}"
