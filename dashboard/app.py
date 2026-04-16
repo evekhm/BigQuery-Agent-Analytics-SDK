@@ -8,7 +8,11 @@ import re
 st.set_page_config(page_title="Agent Analytics V2", layout="wide")
 st.title("🤖 Agent Analytics & Orchestration Dashboard")
 
-# --- 2. Shared Query Fragment ---
+# --- 2. Shared Query Fragment (Resolved PR Issues #1 & #2) ---
+# NOTE: table_ref is injected via string replacement because BigQuery does not
+# support parameterized table names. Security is enforced via strict regex
+# validation of the table identifiers in the sidebar.
+
 ENRICHED_EVENTS_CTE = """
     SELECT
         *,
@@ -25,6 +29,7 @@ ENRICHED_EVENTS_CTE = """
         (status = 'ERROR' OR error_message IS NOT NULL OR event_type LIKE '%_ERROR') AS is_canonical_error
     FROM {table_ref}
     WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @time_hours HOUR)
+    AND (@agent_name IS NULL OR agent = @agent_name)
 """
 
 # --- 3. Sidebar Configuration ---
@@ -63,12 +68,17 @@ def safe_query(sql, params=None):
         st.error(f"Query Failed: {e}")
         return pd.DataFrame()
 
-# --- 5. Global Params ---
-global_params = [bigquery.ScalarQueryParameter("time_hours", "INT64", time_hours)]
+# --- 5. Global Params (Resolved 400 Parameter Error) ---
+
+global_params = [
+    bigquery.ScalarQueryParameter("time_hours", "INT64", time_hours),
+    bigquery.ScalarQueryParameter("agent_name", "STRING", agent_name if agent_name else None)
+]
+
+# WHERE clause for non-CTE queries (Executive Summary & Multimodal)
 where_clause = "timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @time_hours HOUR)"
 if agent_name:
     where_clause += " AND agent = @agent_name"
-    global_params.append(bigquery.ScalarQueryParameter("agent_name", "STRING", agent_name))
 
 # --- 6. Executive Summary ---
 st.header("📊 Executive Summary")
@@ -119,7 +129,6 @@ with tabs[1]:
             APPROX_QUANTILES(CAST(JSON_VALUE(latency_ms, '$.total_ms') AS FLOAT64), 100)[OFFSET(90)] as p90,
             AVG(CAST(JSON_VALUE(latency_ms, '$.time_to_first_token_ms') AS FLOAT64)) as avg_ttft
         FROM enriched WHERE event_family = 'llm'
-        {" AND agent = @agent_name" if agent_name else ""}
     """, params=global_params)
     if not lat_data.empty and pd.notnull(lat_data['p50'][0]):
         p1, p2, p3 = st.columns(3)
@@ -136,7 +145,6 @@ with tabs[2]:
         WITH enriched AS ({ENRICHED_EVENTS_CTE})
         SELECT event_family, event_type, COUNT(*) as errors
         FROM enriched WHERE is_canonical_error = TRUE
-        {" AND agent = @agent_name" if agent_name else ""}
         GROUP BY 1, 2 ORDER BY errors DESC
     """, params=global_params)
     if not err_data.empty:
@@ -157,16 +165,15 @@ with tabs[3]:
         fig = px.pie(multi_data, values='count', names='mime_type')
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No multimodal content (images/audio) found.")
+        st.info("No multimodal content found.")
 
 # TAB 4: HITL
 with tabs[4]:
-    st.subheader("Human-in-the-Loop")
+    st.subheader("Human-in-the-Loop Activity")
     hitl_data = safe_query(f"""
         WITH enriched AS ({ENRICHED_EVENTS_CTE})
         SELECT event_type, COUNT(*) as count
         FROM enriched WHERE event_family = 'hitl'
-        {" AND agent = @agent_name" if agent_name else ""}
         GROUP BY 1
     """, params=global_params)
     if not hitl_data.empty:
@@ -194,4 +201,3 @@ with tabs[5]:
             FROM {table_ref} WHERE session_id = @sid ORDER BY timestamp
         """, params=[bigquery.ScalarQueryParameter("sid", "STRING", sel_id)])
         st.dataframe(trace_detail, use_container_width=True)
-

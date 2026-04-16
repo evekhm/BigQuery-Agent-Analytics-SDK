@@ -3,5 +3,3 @@ plotly
 pandas
 google-cloud-bigquery
 db-dtypes
-            
-
