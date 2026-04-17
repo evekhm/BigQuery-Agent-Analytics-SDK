@@ -165,8 +165,11 @@ class TestDualLoader:
     """GraphSpec from dual loader works with SDK runtime modules."""
     from bigquery_agent_analytics.ontology_schema_compiler import compile_extraction_prompt
     from bigquery_agent_analytics.ontology_schema_compiler import compile_output_schema
+    from bigquery_agent_analytics.resolved_spec import resolve_from_graph_spec
 
-    spec = load_from_ontology_binding(_ONTOLOGY_PATH, _BINDING_PATH)
+    spec = resolve_from_graph_spec(
+        load_from_ontology_binding(_ONTOLOGY_PATH, _BINDING_PATH)
+    )
     prompt = compile_extraction_prompt(spec)
     assert "Customer" in prompt
     assert "Order" in prompt

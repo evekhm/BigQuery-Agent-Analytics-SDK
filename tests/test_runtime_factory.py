@@ -129,7 +129,7 @@ class TestGraphManagerFactory:
 
   def test_spec_is_valid(self):
     from bigquery_agent_analytics.ontology_graph import OntologyGraphManager
-    from bigquery_agent_analytics.ontology_models import _validate_graph_spec
+    from bigquery_agent_analytics.resolved_spec import ResolvedGraph
 
     mgr = OntologyGraphManager.from_ontology_binding(
         project_id="proj",
@@ -137,8 +137,10 @@ class TestGraphManagerFactory:
         ontology=_simple_ontology(),
         binding=_simple_binding(),
     )
-    # Must not raise.
-    _validate_graph_spec(mgr.spec)
+    # Spec must be a valid ResolvedGraph with entities and relationships.
+    assert isinstance(mgr.spec, ResolvedGraph)
+    assert len(mgr.spec.entities) > 0
+    assert len(mgr.spec.relationships) > 0
 
 
 class TestMaterializerFactory:

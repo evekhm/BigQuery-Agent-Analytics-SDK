@@ -22,6 +22,10 @@ from unittest.mock import patch
 
 import pytest
 
+from bigquery_agent_analytics.extracted_models import ExtractedEdge
+from bigquery_agent_analytics.extracted_models import ExtractedGraph
+from bigquery_agent_analytics.extracted_models import ExtractedNode
+from bigquery_agent_analytics.extracted_models import ExtractedProperty
 from bigquery_agent_analytics.ontology_materializer import _ddl_type
 from bigquery_agent_analytics.ontology_materializer import _parse_key_segment
 from bigquery_agent_analytics.ontology_materializer import _route_edge
@@ -29,17 +33,11 @@ from bigquery_agent_analytics.ontology_materializer import _route_node
 from bigquery_agent_analytics.ontology_materializer import compile_entity_ddl
 from bigquery_agent_analytics.ontology_materializer import compile_relationship_ddl
 from bigquery_agent_analytics.ontology_materializer import OntologyMaterializer
-from bigquery_agent_analytics.ontology_models import BindingSpec
-from bigquery_agent_analytics.ontology_models import EntitySpec
-from bigquery_agent_analytics.ontology_models import ExtractedEdge
-from bigquery_agent_analytics.ontology_models import ExtractedGraph
-from bigquery_agent_analytics.ontology_models import ExtractedNode
-from bigquery_agent_analytics.ontology_models import ExtractedProperty
-from bigquery_agent_analytics.ontology_models import GraphSpec
-from bigquery_agent_analytics.ontology_models import KeySpec
-from bigquery_agent_analytics.ontology_models import load_graph_spec
-from bigquery_agent_analytics.ontology_models import PropertySpec
-from bigquery_agent_analytics.ontology_models import RelationshipSpec
+from bigquery_agent_analytics.resolved_spec import load_resolved_graph
+from bigquery_agent_analytics.resolved_spec import ResolvedEntity
+from bigquery_agent_analytics.resolved_spec import ResolvedGraph
+from bigquery_agent_analytics.resolved_spec import ResolvedProperty
+from bigquery_agent_analytics.resolved_spec import ResolvedRelationship
 
 # ------------------------------------------------------------------ #
 # Helpers                                                              #
@@ -47,14 +45,16 @@ from bigquery_agent_analytics.ontology_models import RelationshipSpec
 
 
 def _make_entity(name, props=None, keys=None, source="p.d.t"):
-  props = props or [PropertySpec(name="eid", type="string")]
-  keys = keys or ["eid"]
-  return EntitySpec(
+  props = props or (
+      ResolvedProperty(column="eid", logical_name="eid", sdk_type="string"),
+  )
+  keys = keys or ("eid",)
+  return ResolvedEntity(
       name=name,
-      binding=BindingSpec(source=source),
-      keys=KeySpec(primary=keys),
+      source=source,
+      key_columns=keys,
       properties=props,
-      labels=[name],
+      labels=(name,),
   )
 
 
@@ -62,37 +62,47 @@ def _simple_spec():
   """Two entities, one relationship."""
   a = _make_entity(
       "Alpha",
-      props=[
-          PropertySpec(name="alpha_id", type="string"),
-          PropertySpec(name="score", type="double"),
-      ],
-      keys=["alpha_id"],
+      props=(
+          ResolvedProperty(
+              column="alpha_id", logical_name="alpha_id", sdk_type="string"
+          ),
+          ResolvedProperty(
+              column="score", logical_name="score", sdk_type="double"
+          ),
+      ),
+      keys=("alpha_id",),
       source="p.d.alpha_table",
   )
   b = _make_entity(
       "Beta",
-      props=[
-          PropertySpec(name="beta_id", type="string"),
-          PropertySpec(name="active", type="bool"),
-      ],
-      keys=["beta_id"],
+      props=(
+          ResolvedProperty(
+              column="beta_id", logical_name="beta_id", sdk_type="string"
+          ),
+          ResolvedProperty(
+              column="active", logical_name="active", sdk_type="bool"
+          ),
+      ),
+      keys=("beta_id",),
       source="p.d.beta_table",
   )
-  rel = RelationshipSpec(
+  rel = ResolvedRelationship(
       name="AlphaToBeta",
+      source="p.d.alpha_beta_edges",
       from_entity="Alpha",
       to_entity="Beta",
-      binding=BindingSpec(
-          source="p.d.alpha_beta_edges",
-          from_columns=["alpha_id"],
-          to_columns=["beta_id"],
+      from_columns=("alpha_id",),
+      to_columns=("beta_id",),
+      properties=(
+          ResolvedProperty(
+              column="weight", logical_name="weight", sdk_type="double"
+          ),
       ),
-      properties=[PropertySpec(name="weight", type="double")],
   )
-  return GraphSpec(
+  return ResolvedGraph(
       name="test_graph",
-      entities=[a, b],
-      relationships=[rel],
+      entities=(a, b),
+      relationships=(rel,),
   )
 
 
@@ -144,10 +154,14 @@ class TestCompileEntityDdl:
   def test_creates_table(self):
     entity = _make_entity(
         "Alpha",
-        props=[
-            PropertySpec(name="alpha_id", type="string"),
-            PropertySpec(name="score", type="double"),
-        ],
+        props=(
+            ResolvedProperty(
+                column="alpha_id", logical_name="alpha_id", sdk_type="string"
+            ),
+            ResolvedProperty(
+                column="score", logical_name="score", sdk_type="double"
+            ),
+        ),
         source="p.d.alpha_table",
     )
     ddl = compile_entity_ddl(entity, "proj", "ds")
@@ -157,12 +171,20 @@ class TestCompileEntityDdl:
   def test_column_types(self):
     entity = _make_entity(
         "Alpha",
-        props=[
-            PropertySpec(name="alpha_id", type="string"),
-            PropertySpec(name="score", type="double"),
-            PropertySpec(name="count", type="int64"),
-            PropertySpec(name="active", type="bool"),
-        ],
+        props=(
+            ResolvedProperty(
+                column="alpha_id", logical_name="alpha_id", sdk_type="string"
+            ),
+            ResolvedProperty(
+                column="score", logical_name="score", sdk_type="double"
+            ),
+            ResolvedProperty(
+                column="count", logical_name="count", sdk_type="int64"
+            ),
+            ResolvedProperty(
+                column="active", logical_name="active", sdk_type="bool"
+            ),
+        ),
         source="p.d.t",
     )
     ddl = compile_entity_ddl(entity, "proj", "ds")
@@ -178,7 +200,7 @@ class TestCompileEntityDdl:
     assert "extracted_at TIMESTAMP" in ddl
 
   def test_short_source_prefixed(self):
-    """If binding.source has <2 dots, prefix with project.dataset."""
+    """If source has <2 dots, prefix with project.dataset."""
     entity = _make_entity("A", source="my_table")
     ddl = compile_entity_ddl(entity, "proj", "ds")
     assert "`proj.ds.my_table`" in ddl
@@ -221,25 +243,26 @@ class TestCompileRelationshipDdl:
   def test_composite_keys(self):
     entity = _make_entity(
         "Multi",
-        props=[
-            PropertySpec(name="k1", type="string"),
-            PropertySpec(name="k2", type="int64"),
-        ],
-        keys=["k1", "k2"],
+        props=(
+            ResolvedProperty(column="k1", logical_name="k1", sdk_type="string"),
+            ResolvedProperty(column="k2", logical_name="k2", sdk_type="int64"),
+        ),
+        keys=("k1", "k2"),
         source="p.d.multi",
     )
     other = _make_entity("Other", source="p.d.other")
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="R",
+        source="p.d.edges",
         from_entity="Multi",
         to_entity="Other",
-        binding=BindingSpec(
-            source="p.d.edges",
-            from_columns=["k1", "k2"],
-            to_columns=["eid"],
-        ),
+        from_columns=("k1", "k2"),
+        to_columns=("eid",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[entity, other], relationships=[rel])
+    spec = ResolvedGraph(
+        name="g", entities=(entity, other), relationships=(rel,)
+    )
     ddl = compile_relationship_ddl(rel, spec, "proj", "ds")
     assert "k1 STRING" in ddl
     assert "k2 INT64" in ddl
@@ -253,7 +276,7 @@ class TestCompileRelationshipDdl:
         "examples",
         "ymgo_graph_spec.yaml",
     )
-    spec = load_graph_spec(demo_path, env="p.d")
+    spec = load_resolved_graph(demo_path, env="p.d")
     for entity in spec.entities:
       ddl = compile_entity_ddl(entity, "proj", "ds")
       assert "CREATE TABLE IF NOT EXISTS" in ddl
@@ -349,25 +372,26 @@ class TestRouteEdge:
   def test_composite_key_routing(self):
     entity = _make_entity(
         "Multi",
-        props=[
-            PropertySpec(name="k1", type="string"),
-            PropertySpec(name="k2", type="int64"),
-        ],
-        keys=["k1", "k2"],
+        props=(
+            ResolvedProperty(column="k1", logical_name="k1", sdk_type="string"),
+            ResolvedProperty(column="k2", logical_name="k2", sdk_type="int64"),
+        ),
+        keys=("k1", "k2"),
         source="p.d.multi",
     )
     other = _make_entity("Other", source="p.d.other")
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="R",
+        source="p.d.edges",
         from_entity="Multi",
         to_entity="Other",
-        binding=BindingSpec(
-            source="p.d.edges",
-            from_columns=["k1", "k2"],
-            to_columns=["eid"],
-        ),
+        from_columns=("k1", "k2"),
+        to_columns=("eid",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[entity, other], relationships=[rel])
+    spec = ResolvedGraph(
+        name="g", entities=(entity, other), relationships=(rel,)
+    )
     edge = ExtractedEdge(
         edge_id="sess1:R:0",
         relationship_name="R",
@@ -384,26 +408,27 @@ class TestRouteEdge:
     """from_columns can be a subset of the source entity's primary keys."""
     entity = _make_entity(
         "Multi",
-        props=[
-            PropertySpec(name="k1", type="string"),
-            PropertySpec(name="k2", type="int64"),
-        ],
-        keys=["k1", "k2"],
+        props=(
+            ResolvedProperty(column="k1", logical_name="k1", sdk_type="string"),
+            ResolvedProperty(column="k2", logical_name="k2", sdk_type="int64"),
+        ),
+        keys=("k1", "k2"),
         source="p.d.multi",
     )
     other = _make_entity("Other", source="p.d.other")
     # Relationship only binds on k2, not the full composite key.
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="R",
+        source="p.d.edges",
         from_entity="Multi",
         to_entity="Other",
-        binding=BindingSpec(
-            source="p.d.edges",
-            from_columns=["k2"],
-            to_columns=["eid"],
-        ),
+        from_columns=("k2",),
+        to_columns=("eid",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[entity, other], relationships=[rel])
+    spec = ResolvedGraph(
+        name="g", entities=(entity, other), relationships=(rel,)
+    )
     edge = ExtractedEdge(
         edge_id="sess1:R:0",
         relationship_name="R",
@@ -421,25 +446,26 @@ class TestRouteEdge:
     """DDL should only include the binding columns, not all entity PKs."""
     entity = _make_entity(
         "Multi",
-        props=[
-            PropertySpec(name="k1", type="string"),
-            PropertySpec(name="k2", type="int64"),
-        ],
-        keys=["k1", "k2"],
+        props=(
+            ResolvedProperty(column="k1", logical_name="k1", sdk_type="string"),
+            ResolvedProperty(column="k2", logical_name="k2", sdk_type="int64"),
+        ),
+        keys=("k1", "k2"),
         source="p.d.multi",
     )
     other = _make_entity("Other", source="p.d.other")
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="R",
+        source="p.d.edges",
         from_entity="Multi",
         to_entity="Other",
-        binding=BindingSpec(
-            source="p.d.edges",
-            from_columns=["k2"],
-            to_columns=["eid"],
-        ),
+        from_columns=("k2",),
+        to_columns=("eid",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[entity, other], relationships=[rel])
+    spec = ResolvedGraph(
+        name="g", entities=(entity, other), relationships=(rel,)
+    )
     ddl = compile_relationship_ddl(rel, spec, "proj", "ds")
     # Only k2 from from_columns, not k1.
     assert "k2 INT64" in ddl
@@ -538,23 +564,33 @@ class TestGetDdl:
     shared_table = "p.d.shared_table"
     alpha = _make_entity(
         "Alpha",
-        props=[
-            PropertySpec(name="alpha_id", type="string"),
-            PropertySpec(name="kind", type="string"),
-        ],
-        keys=["alpha_id"],
+        props=(
+            ResolvedProperty(
+                column="alpha_id", logical_name="alpha_id", sdk_type="string"
+            ),
+            ResolvedProperty(
+                column="kind", logical_name="kind", sdk_type="string"
+            ),
+        ),
+        keys=("alpha_id",),
         source=shared_table,
     )
     beta = _make_entity(
         "Beta",
-        props=[
-            PropertySpec(name="beta_id", type="string"),
-            PropertySpec(name="status", type="int64"),
-        ],
-        keys=["beta_id"],
+        props=(
+            ResolvedProperty(
+                column="beta_id", logical_name="beta_id", sdk_type="string"
+            ),
+            ResolvedProperty(
+                column="status", logical_name="status", sdk_type="int64"
+            ),
+        ),
+        keys=("beta_id",),
         source=shared_table,
     )
-    spec = GraphSpec(name="shared", entities=[alpha, beta], relationships=[])
+    spec = ResolvedGraph(
+        name="shared", entities=(alpha, beta), relationships=()
+    )
     mat = OntologyMaterializer(
         project_id="proj",
         dataset_id="ds",
@@ -624,27 +660,37 @@ class TestCreateTables:
     assert len(result) == 2
 
   def test_shared_source_merges_columns(self):
-    """Two entities sharing binding.source get one merged CREATE TABLE."""
+    """Two entities sharing source get one merged CREATE TABLE."""
     shared_table = "p.d.shared_table"
     alpha = _make_entity(
         "Alpha",
-        props=[
-            PropertySpec(name="alpha_id", type="string"),
-            PropertySpec(name="kind", type="string"),
-        ],
-        keys=["alpha_id"],
+        props=(
+            ResolvedProperty(
+                column="alpha_id", logical_name="alpha_id", sdk_type="string"
+            ),
+            ResolvedProperty(
+                column="kind", logical_name="kind", sdk_type="string"
+            ),
+        ),
+        keys=("alpha_id",),
         source=shared_table,
     )
     beta = _make_entity(
         "Beta",
-        props=[
-            PropertySpec(name="beta_id", type="string"),
-            PropertySpec(name="status", type="int64"),
-        ],
-        keys=["beta_id"],
+        props=(
+            ResolvedProperty(
+                column="beta_id", logical_name="beta_id", sdk_type="string"
+            ),
+            ResolvedProperty(
+                column="status", logical_name="status", sdk_type="int64"
+            ),
+        ),
+        keys=("beta_id",),
         source=shared_table,
     )
-    spec = GraphSpec(name="shared", entities=[alpha, beta], relationships=[])
+    spec = ResolvedGraph(
+        name="shared", entities=(alpha, beta), relationships=()
+    )
 
     mock_client = _mock_bq_client()
     mock_job = MagicMock()
@@ -677,22 +723,30 @@ class TestCreateTables:
     shared_table = "p.d.conflict"
     alpha = _make_entity(
         "Alpha",
-        props=[
-            PropertySpec(name="eid", type="string"),
-            PropertySpec(name="score", type="double"),
-        ],
-        keys=["eid"],
+        props=(
+            ResolvedProperty(
+                column="eid", logical_name="eid", sdk_type="string"
+            ),
+            ResolvedProperty(
+                column="score", logical_name="score", sdk_type="double"
+            ),
+        ),
+        keys=("eid",),
         source=shared_table,
     )
     beta = _make_entity(
         "Beta",
-        props=[
-            PropertySpec(name="eid", type="int64"),  # conflict: STRING vs INT64
-        ],
-        keys=["eid"],
+        props=(
+            ResolvedProperty(
+                column="eid", logical_name="eid", sdk_type="int64"
+            ),  # conflict: STRING vs INT64
+        ),
+        keys=("eid",),
         source=shared_table,
     )
-    spec = GraphSpec(name="conflict", entities=[alpha, beta], relationships=[])
+    spec = ResolvedGraph(
+        name="conflict", entities=(alpha, beta), relationships=()
+    )
 
     mat = OntologyMaterializer(
         project_id="proj",
@@ -868,7 +922,7 @@ class TestMaterialize:
     assert result == {}
 
   def test_shared_binding_source_no_data_loss(self):
-    """Two entities sharing the same binding.source must not lose rows.
+    """Two entities sharing the same source must not lose rows.
 
     When multiple spec entries map to the same physical table, the
     materializer must group all rows before doing one delete + one
@@ -880,24 +934,32 @@ class TestMaterialize:
     shared_table = "p.d.shared_table"
     alpha = _make_entity(
         "Alpha",
-        props=[
-            PropertySpec(name="alpha_id", type="string"),
-            PropertySpec(name="kind", type="string"),
-        ],
-        keys=["alpha_id"],
+        props=(
+            ResolvedProperty(
+                column="alpha_id", logical_name="alpha_id", sdk_type="string"
+            ),
+            ResolvedProperty(
+                column="kind", logical_name="kind", sdk_type="string"
+            ),
+        ),
+        keys=("alpha_id",),
         source=shared_table,
     )
     beta = _make_entity(
         "Beta",
-        props=[
-            PropertySpec(name="beta_id", type="string"),
-            PropertySpec(name="kind", type="string"),
-        ],
-        keys=["beta_id"],
+        props=(
+            ResolvedProperty(
+                column="beta_id", logical_name="beta_id", sdk_type="string"
+            ),
+            ResolvedProperty(
+                column="kind", logical_name="kind", sdk_type="string"
+            ),
+        ),
+        keys=("beta_id",),
         source=shared_table,
     )
-    spec = GraphSpec(
-        name="shared_test", entities=[alpha, beta], relationships=[]
+    spec = ResolvedGraph(
+        name="shared_test", entities=(alpha, beta), relationships=()
     )
 
     graph = ExtractedGraph(

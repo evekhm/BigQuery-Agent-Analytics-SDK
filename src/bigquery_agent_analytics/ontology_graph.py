@@ -25,10 +25,10 @@ lazy client initialization) without modifying V3 code.
 
 Example usage::
 
-    from bigquery_agent_analytics.ontology_models import load_graph_spec
+    from bigquery_agent_analytics.resolved_spec import load_resolved_graph
     from bigquery_agent_analytics.ontology_graph import OntologyGraphManager
 
-    spec = load_graph_spec("examples/ymgo_graph_spec.yaml", env="p.d")
+    spec = load_resolved_graph("examples/ymgo_graph_spec.yaml", env="p.d")
     mgr = OntologyGraphManager(
         project_id="my-project",
         dataset_id="analytics",
@@ -47,14 +47,24 @@ from typing import Optional
 
 from google.cloud import bigquery
 
-from .ontology_models import EntitySpec
-from .ontology_models import ExtractedEdge
-from .ontology_models import ExtractedGraph
-from .ontology_models import ExtractedNode
-from .ontology_models import ExtractedProperty
-from .ontology_models import GraphSpec
+from .extracted_models import ExtractedEdge
+from .extracted_models import ExtractedGraph
+from .extracted_models import ExtractedNode
+from .extracted_models import ExtractedProperty
 from .ontology_schema_compiler import compile_extraction_prompt
 from .ontology_schema_compiler import compile_output_schema
+from .resolved_spec import resolve_from_graph_spec
+from .resolved_spec import ResolvedEntity
+from .resolved_spec import ResolvedGraph
+
+
+def _ensure_resolved(spec):
+  """Accept either ResolvedGraph or legacy GraphSpec, return ResolvedGraph."""
+  if isinstance(spec, ResolvedGraph):
+    return spec
+  return resolve_from_graph_spec(spec)
+
+
 from .structured_extraction import run_structured_extractors
 from .structured_extraction import StructuredExtractor
 
@@ -163,7 +173,7 @@ ORDER BY base.timestamp ASC
 
 
 def _hydrate_graph(
-    spec: GraphSpec,
+    spec: ResolvedGraph,
     raw_rows: list[dict],
 ) -> ExtractedGraph:
   """Hydrate raw AI.GENERATE JSON rows into an ``ExtractedGraph``.
@@ -185,7 +195,7 @@ def _hydrate_graph(
   Edge IDs: ``{session_id}:{relationship_name}:{idx}``.
 
   Args:
-      spec: The ``GraphSpec`` used for extraction.
+      spec: The ``ResolvedGraph`` used for extraction.
       raw_rows: List of dicts with ``session_id`` and
           ``graph_json`` keys.
 
@@ -221,7 +231,7 @@ def _hydrate_graph(
     for idx, raw_node in enumerate(data.get("nodes", [])):
       entity_name = raw_node.get("entity_name", "")
       entity_spec = entity_map.get(entity_name)
-      labels = entity_spec.labels if entity_spec else [entity_name]
+      labels = list(entity_spec.labels) if entity_spec else [entity_name]
 
       node_id = _build_node_id(
           raw_node, entity_name, entity_spec, session_id, idx
@@ -287,7 +297,7 @@ def _build_key_string(keys_obj: dict) -> str:
 def _build_node_id(
     raw_node: dict,
     entity_name: str,
-    entity_spec: Optional[EntitySpec],
+    entity_spec: Optional[ResolvedEntity],
     session_id: str,
     idx: int,
 ) -> str:
@@ -303,7 +313,7 @@ def _build_node_id(
   """
   if entity_spec is not None:
     keys_obj = {}
-    for col in entity_spec.keys.primary:
+    for col in entity_spec.key_columns:
       if col not in raw_node:
         # Missing key column — fall back to index-based ID.
         return f"{session_id}:{entity_name}:{idx}"
@@ -350,7 +360,7 @@ class OntologyGraphManager:
   Args:
       project_id: GCP project ID.
       dataset_id: BigQuery dataset ID.
-      spec: A validated ``GraphSpec`` (from ``load_graph_spec``).
+      spec: A validated ``ResolvedGraph`` (from ``load_graph_spec``).
       table_id: Source telemetry table name.
       endpoint: AI.GENERATE model endpoint.
       location: BigQuery location.
@@ -361,7 +371,7 @@ class OntologyGraphManager:
       self,
       project_id: str,
       dataset_id: str,
-      spec: GraphSpec,
+      spec: ResolvedGraph,
       table_id: str = "agent_events",
       endpoint: str = "gemini-2.5-flash",
       location: Optional[str] = None,
@@ -370,7 +380,7 @@ class OntologyGraphManager:
   ) -> None:
     self.project_id = project_id
     self.dataset_id = dataset_id
-    self.spec = spec
+    self.spec = _ensure_resolved(spec)
     self.table_id = table_id
     self.endpoint = endpoint
     self.location = location
@@ -393,8 +403,8 @@ class OntologyGraphManager:
   ) -> "OntologyGraphManager":
     """Create from upstream Ontology + Binding.
 
-    Converts the separated ontology/binding pair into a ``GraphSpec``
-    via the runtime adapter, then constructs the manager.
+    Converts the separated ontology/binding pair into a ``ResolvedGraph``
+    via the resolver, then constructs the manager.
 
     Note: ``project_id`` and ``dataset_id`` control where the manager
     reads telemetry from (``{project}.{dataset}.{table_id}``). This
@@ -418,16 +428,9 @@ class OntologyGraphManager:
     Returns:
         A configured ``OntologyGraphManager``.
     """
-    from .runtime_spec import graph_spec_from_ontology_binding
+    from .resolved_spec import resolve
 
-    spec = graph_spec_from_ontology_binding(
-        ontology, binding, lineage_config=lineage_config
-    )
-    from .ontology_models import _resolve_inheritance
-    from .ontology_models import _validate_graph_spec
-
-    _resolve_inheritance(spec)
-    _validate_graph_spec(spec)
+    spec = resolve(ontology, binding, lineage_config=lineage_config)
     return cls(
         project_id=project_id,
         dataset_id=dataset_id,
@@ -731,7 +734,7 @@ def detect_lineage_edges(
     current_session_id: str,
     prior_graphs: dict[str, ExtractedGraph],
     lineage_entity_types: list[str],
-    spec: GraphSpec,
+    spec: ResolvedGraph,
 ) -> list[ExtractedEdge]:
   """Detect evolution edges between current and prior session graphs.
 
@@ -745,7 +748,7 @@ def detect_lineage_edges(
       prior_graphs: Dict of ``{session_id: ExtractedGraph}`` for
           prior sessions.
       lineage_entity_types: Entity names to check for evolution.
-      spec: GraphSpec for entity key lookups.
+      spec: ResolvedGraph for entity key lookups.
 
   Returns:
       List of ``ExtractedEdge`` instances for lineage relationships.
@@ -758,7 +761,7 @@ def detect_lineage_edges(
     if entity_spec is None:
       continue
 
-    key_cols = entity_spec.keys.primary
+    key_cols = entity_spec.key_columns
 
     # Index current-session nodes by primary key values.
     current_by_key: dict[str, ExtractedNode] = {}

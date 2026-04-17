@@ -50,8 +50,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from .ontology_models import GraphSpec
-from .ontology_models import load_graph_spec
+from .resolved_spec import ResolvedGraph
 
 logger = logging.getLogger("bigquery_agent_analytics." + __name__)
 
@@ -84,7 +83,7 @@ LIMIT @result_limit
 
 
 def compile_showcase_gql(
-    spec: GraphSpec,
+    spec: ResolvedGraph,
     project_id: str,
     dataset_id: str,
     graph_name: Optional[str] = None,
@@ -158,14 +157,14 @@ def compile_showcase_gql(
   # destination PKs + properties.
   return_cols = []
   for prop in src_entity.properties:
-    return_cols.append(f"{src_alias}.{prop.name} AS src_{prop.name}")
+    return_cols.append(f"{src_alias}.{prop.column} AS src_{prop.column}")
   for prop in rel.properties:
-    return_cols.append(f"{edge_alias}.{prop.name}")
+    return_cols.append(f"{edge_alias}.{prop.column}")
   for prop in dst_entity.properties:
-    return_cols.append(f"{dst_alias}.{prop.name} AS dst_{prop.name}")
+    return_cols.append(f"{dst_alias}.{prop.column} AS dst_{prop.column}")
 
   # Order by the source entity's first primary key.
-  order_column = f"{src_alias}.{src_entity.keys.primary[0]}"
+  order_column = f"{src_alias}.{src_entity.key_columns[0]}"
 
   return _SHOWCASE_GQL_TEMPLATE.format(
       graph_ref=graph_ref,
@@ -182,7 +181,7 @@ def compile_showcase_gql(
 
 
 def compile_lineage_gql(
-    spec: GraphSpec,
+    spec: ResolvedGraph,
     project_id: str,
     dataset_id: str,
     relationship_name: str,
@@ -241,11 +240,13 @@ def compile_lineage_gql(
 
   return_cols = []
   for prop in entity.properties:
-    return_cols.append(f"{prior_alias}.{prop.name} AS prior_{prop.name}")
+    return_cols.append(f"{prior_alias}.{prop.column} AS prior_{prop.column}")
   for prop in rel.properties:
-    return_cols.append(f"{edge_alias}.{prop.name}")
+    return_cols.append(f"{edge_alias}.{prop.column}")
   for prop in entity.properties:
-    return_cols.append(f"{current_alias}.{prop.name} AS current_{prop.name}")
+    return_cols.append(
+        f"{current_alias}.{prop.column} AS current_{prop.column}"
+    )
 
   return _LINEAGE_GQL_TEMPLATE.format(
       graph_ref=graph_ref,
@@ -289,9 +290,10 @@ def _short_alias(name: str, prefix: str = "") -> str:
 
 def build_ontology_graph(
     session_ids: list[str],
-    spec_path: str,
     project_id: str,
     dataset_id: str,
+    spec_path: str | None = None,
+    spec: ResolvedGraph | None = None,
     env: Optional[str] = None,
     graph_name: Optional[str] = None,
     table_id: str = "agent_events",
@@ -301,7 +303,7 @@ def build_ontology_graph(
 ) -> dict[str, Any]:
   """Run the full ontology graph pipeline end-to-end.
 
-  1. Load the YAML spec.
+  1. Load the YAML spec (or use pre-loaded ``spec``).
   2. Extract an ``ExtractedGraph`` from agent telemetry.
   3. Create physical tables (if not exists).
   4. Materialize extracted nodes/edges into tables.
@@ -309,9 +311,12 @@ def build_ontology_graph(
 
   Args:
       session_ids: Sessions to extract from.
-      spec_path: Path to the YAML graph spec.
       project_id: GCP project ID.
       dataset_id: BigQuery dataset ID.
+      spec_path: [Deprecated] Path to the YAML graph spec. Use
+          ``spec`` instead.
+      spec: A pre-loaded ``ResolvedGraph``. Preferred over
+          ``spec_path``.
       env: Value for ``{{ env }}`` placeholder substitution.
       graph_name: Override the property graph name.
       table_id: Source telemetry table name.
@@ -328,8 +333,13 @@ def build_ontology_graph(
   from .ontology_materializer import OntologyMaterializer
   from .ontology_property_graph import OntologyPropertyGraphCompiler
 
-  # 1. Load spec.
-  spec = load_graph_spec(spec_path, env=env)
+  # 1. Load spec (or use pre-loaded ResolvedGraph).
+  if spec is None:
+    if spec_path is None:
+      raise ValueError("Either spec or spec_path is required.")
+    from .resolved_spec import load_resolved_graph
+
+    spec = load_resolved_graph(spec_path, env=env)
   name = graph_name or spec.name
   logger.info(
       "Loaded spec %r with %d entities, %d relationships.",

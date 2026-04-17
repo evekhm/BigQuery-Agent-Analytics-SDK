@@ -1,5 +1,10 @@
 # Ontology Graph V4 — Configuration-Driven Context Graph
 
+> **Migration note (issue #38):** This design doc is a historical record. The implementation
+> has migrated from `GraphSpec` to `ResolvedGraph`. `load_graph_spec()` is replaced by
+> `load_ontology()` + `load_binding()` + `resolve()`. See the V5 demo notebook for the
+> current approach.
+
 Turn unstructured agent telemetry into a queryable knowledge graph using a
 single YAML file. No code changes required — define your ontology, point
 it at your data, and the SDK handles extraction, materialization, and

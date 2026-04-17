@@ -22,17 +22,15 @@ from unittest.mock import patch
 
 import pytest
 
-from bigquery_agent_analytics.ontology_models import BindingSpec
-from bigquery_agent_analytics.ontology_models import EntitySpec
-from bigquery_agent_analytics.ontology_models import GraphSpec
-from bigquery_agent_analytics.ontology_models import KeySpec
-from bigquery_agent_analytics.ontology_models import load_graph_spec
-from bigquery_agent_analytics.ontology_models import PropertySpec
-from bigquery_agent_analytics.ontology_models import RelationshipSpec
 from bigquery_agent_analytics.ontology_property_graph import compile_edge_table_clause
 from bigquery_agent_analytics.ontology_property_graph import compile_node_table_clause
 from bigquery_agent_analytics.ontology_property_graph import compile_property_graph_ddl
 from bigquery_agent_analytics.ontology_property_graph import OntologyPropertyGraphCompiler
+from bigquery_agent_analytics.resolved_spec import load_resolved_graph
+from bigquery_agent_analytics.resolved_spec import ResolvedEntity
+from bigquery_agent_analytics.resolved_spec import ResolvedGraph
+from bigquery_agent_analytics.resolved_spec import ResolvedProperty
+from bigquery_agent_analytics.resolved_spec import ResolvedRelationship
 
 # ------------------------------------------------------------------ #
 # Helpers                                                              #
@@ -40,13 +38,15 @@ from bigquery_agent_analytics.ontology_property_graph import OntologyPropertyGra
 
 
 def _make_entity(name, props=None, keys=None, source="p.d.t", labels=None):
-  props = props or [PropertySpec(name="eid", type="string")]
-  keys = keys or ["eid"]
-  labels = labels or [name]
-  return EntitySpec(
+  props = props or (
+      ResolvedProperty(column="eid", logical_name="eid", sdk_type="string"),
+  )
+  keys = keys or ("eid",)
+  labels = labels or (name,)
+  return ResolvedEntity(
       name=name,
-      binding=BindingSpec(source=source),
-      keys=KeySpec(primary=keys),
+      source=source,
+      key_columns=keys,
       properties=props,
       labels=labels,
   )
@@ -56,37 +56,47 @@ def _simple_spec():
   """Two entities, one relationship — matches the materializer test spec."""
   a = _make_entity(
       "Alpha",
-      props=[
-          PropertySpec(name="alpha_id", type="string"),
-          PropertySpec(name="score", type="double"),
-      ],
-      keys=["alpha_id"],
+      props=(
+          ResolvedProperty(
+              column="alpha_id", logical_name="alpha_id", sdk_type="string"
+          ),
+          ResolvedProperty(
+              column="score", logical_name="score", sdk_type="double"
+          ),
+      ),
+      keys=("alpha_id",),
       source="p.d.alpha_table",
   )
   b = _make_entity(
       "Beta",
-      props=[
-          PropertySpec(name="beta_id", type="string"),
-          PropertySpec(name="active", type="bool"),
-      ],
-      keys=["beta_id"],
+      props=(
+          ResolvedProperty(
+              column="beta_id", logical_name="beta_id", sdk_type="string"
+          ),
+          ResolvedProperty(
+              column="active", logical_name="active", sdk_type="bool"
+          ),
+      ),
+      keys=("beta_id",),
       source="p.d.beta_table",
   )
-  rel = RelationshipSpec(
+  rel = ResolvedRelationship(
       name="AlphaToBeta",
+      source="p.d.alpha_beta_edges",
       from_entity="Alpha",
       to_entity="Beta",
-      binding=BindingSpec(
-          source="p.d.alpha_beta_edges",
-          from_columns=["alpha_id"],
-          to_columns=["beta_id"],
+      from_columns=("alpha_id",),
+      to_columns=("beta_id",),
+      properties=(
+          ResolvedProperty(
+              column="weight", logical_name="weight", sdk_type="double"
+          ),
       ),
-      properties=[PropertySpec(name="weight", type="double")],
   )
-  return GraphSpec(
+  return ResolvedGraph(
       name="test_graph",
-      entities=[a, b],
-      relationships=[rel],
+      entities=(a, b),
+      relationships=(rel,),
   )
 
 
@@ -104,11 +114,15 @@ class TestCompileNodeTableClause:
   def test_basic_entity(self):
     entity = _make_entity(
         "Alpha",
-        props=[
-            PropertySpec(name="alpha_id", type="string"),
-            PropertySpec(name="score", type="double"),
-        ],
-        keys=["alpha_id"],
+        props=(
+            ResolvedProperty(
+                column="alpha_id", logical_name="alpha_id", sdk_type="string"
+            ),
+            ResolvedProperty(
+                column="score", logical_name="score", sdk_type="double"
+            ),
+        ),
+        keys=("alpha_id",),
         source="p.d.alpha_table",
     )
     clause = compile_node_table_clause(entity, "proj", "ds")
@@ -129,12 +143,14 @@ class TestCompileNodeTableClause:
   def test_composite_keys(self):
     entity = _make_entity(
         "Multi",
-        props=[
-            PropertySpec(name="k1", type="string"),
-            PropertySpec(name="k2", type="int64"),
-            PropertySpec(name="val", type="string"),
-        ],
-        keys=["k1", "k2"],
+        props=(
+            ResolvedProperty(column="k1", logical_name="k1", sdk_type="string"),
+            ResolvedProperty(column="k2", logical_name="k2", sdk_type="int64"),
+            ResolvedProperty(
+                column="val", logical_name="val", sdk_type="string"
+            ),
+        ),
+        keys=("k1", "k2"),
         source="p.d.multi",
     )
     clause = compile_node_table_clause(entity, "proj", "ds")
@@ -150,10 +166,14 @@ class TestCompileNodeTableClause:
     """Entity with extends gets multiple LABEL lines."""
     entity = _make_entity(
         "sup_YahooAdUnit",
-        props=[PropertySpec(name="adUnitId", type="string")],
-        keys=["adUnitId"],
+        props=(
+            ResolvedProperty(
+                column="adUnitId", logical_name="adUnitId", sdk_type="string"
+            ),
+        ),
+        keys=("adUnitId",),
         source="p.d.yahoo_ad_units",
-        labels=["sup_YahooAdUnit", "mako_Candidate"],
+        labels=("sup_YahooAdUnit", "mako_Candidate"),
     )
     clause = compile_node_table_clause(entity, "proj", "ds")
     assert "LABEL sup_YahooAdUnit" in clause
@@ -199,27 +219,34 @@ class TestCompileEdgeTableClause:
     """If from_columns and to_columns share a column, edge KEY deduplicates."""
     a = _make_entity(
         "A",
-        props=[PropertySpec(name="shared_id", type="string")],
-        keys=["shared_id"],
+        props=(
+            ResolvedProperty(
+                column="shared_id", logical_name="shared_id", sdk_type="string"
+            ),
+        ),
+        keys=("shared_id",),
         source="p.d.a",
     )
     b = _make_entity(
         "B",
-        props=[PropertySpec(name="shared_id", type="string")],
-        keys=["shared_id"],
+        props=(
+            ResolvedProperty(
+                column="shared_id", logical_name="shared_id", sdk_type="string"
+            ),
+        ),
+        keys=("shared_id",),
         source="p.d.b",
     )
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="SelfRef",
+        source="p.d.self_edges",
         from_entity="A",
         to_entity="B",
-        binding=BindingSpec(
-            source="p.d.self_edges",
-            from_columns=["shared_id"],
-            to_columns=["shared_id"],
-        ),
+        from_columns=("shared_id",),
+        to_columns=("shared_id",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[a, b], relationships=[rel])
+    spec = ResolvedGraph(name="g", entities=(a, b), relationships=(rel,))
     clause = compile_edge_table_clause(rel, spec, "proj", "ds")
     # KEY should not duplicate shared_id; session_id is appended.
     assert "KEY (shared_id, session_id)" in clause
@@ -227,25 +254,24 @@ class TestCompileEdgeTableClause:
   def test_composite_foreign_keys(self):
     src = _make_entity(
         "Src",
-        props=[
-            PropertySpec(name="k1", type="string"),
-            PropertySpec(name="k2", type="int64"),
-        ],
-        keys=["k1", "k2"],
+        props=(
+            ResolvedProperty(column="k1", logical_name="k1", sdk_type="string"),
+            ResolvedProperty(column="k2", logical_name="k2", sdk_type="int64"),
+        ),
+        keys=("k1", "k2"),
         source="p.d.src",
     )
     tgt = _make_entity("Tgt", source="p.d.tgt")
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="R",
+        source="p.d.edges",
         from_entity="Src",
         to_entity="Tgt",
-        binding=BindingSpec(
-            source="p.d.edges",
-            from_columns=["k1", "k2"],
-            to_columns=["eid"],
-        ),
+        from_columns=("k1", "k2"),
+        to_columns=("eid",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[src, tgt], relationships=[rel])
+    spec = ResolvedGraph(name="g", entities=(src, tgt), relationships=(rel,))
     clause = compile_edge_table_clause(rel, spec, "proj", "ds")
     assert "KEY (k1, k2, eid, session_id)" in clause
     assert (
@@ -259,23 +285,34 @@ class TestCompileEdgeTableClause:
     """When from_columns/to_columns are not set, defaults to entity PKs."""
     a = _make_entity(
         "A",
-        props=[PropertySpec(name="a_id", type="string")],
-        keys=["a_id"],
+        props=(
+            ResolvedProperty(
+                column="a_id", logical_name="a_id", sdk_type="string"
+            ),
+        ),
+        keys=("a_id",),
         source="p.d.a",
     )
     b = _make_entity(
         "B",
-        props=[PropertySpec(name="b_id", type="string")],
-        keys=["b_id"],
+        props=(
+            ResolvedProperty(
+                column="b_id", logical_name="b_id", sdk_type="string"
+            ),
+        ),
+        keys=("b_id",),
         source="p.d.b",
     )
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="R",
+        source="p.d.edges",
         from_entity="A",
         to_entity="B",
-        binding=BindingSpec(source="p.d.edges"),
+        from_columns=("a_id",),
+        to_columns=("b_id",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[a, b], relationships=[rel])
+    spec = ResolvedGraph(name="g", entities=(a, b), relationships=(rel,))
     clause = compile_edge_table_clause(rel, spec, "proj", "ds")
     assert (
         "SOURCE KEY (a_id, session_id) REFERENCES A (a_id, session_id)"
@@ -288,31 +325,41 @@ class TestCompileEdgeTableClause:
     """Edge properties should not include columns already in KEY."""
     a = _make_entity(
         "A",
-        props=[PropertySpec(name="a_id", type="string")],
-        keys=["a_id"],
+        props=(
+            ResolvedProperty(
+                column="a_id", logical_name="a_id", sdk_type="string"
+            ),
+        ),
+        keys=("a_id",),
         source="p.d.a",
     )
     b = _make_entity(
         "B",
-        props=[PropertySpec(name="b_id", type="string")],
-        keys=["b_id"],
+        props=(
+            ResolvedProperty(
+                column="b_id", logical_name="b_id", sdk_type="string"
+            ),
+        ),
+        keys=("b_id",),
         source="p.d.b",
     )
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="R",
+        source="p.d.edges",
         from_entity="A",
         to_entity="B",
-        binding=BindingSpec(
-            source="p.d.edges",
-            from_columns=["a_id"],
-            to_columns=["b_id"],
+        from_columns=("a_id",),
+        to_columns=("b_id",),
+        properties=(
+            ResolvedProperty(
+                column="a_id", logical_name="a_id", sdk_type="string"
+            ),
+            ResolvedProperty(
+                column="extra", logical_name="extra", sdk_type="string"
+            ),
         ),
-        properties=[
-            PropertySpec(name="a_id", type="string"),
-            PropertySpec(name="extra", type="string"),
-        ],
     )
-    spec = GraphSpec(name="g", entities=[a, b], relationships=[rel])
+    spec = ResolvedGraph(name="g", entities=(a, b), relationships=(rel,))
     clause = compile_edge_table_clause(rel, spec, "proj", "ds")
     props_section = clause.split("PROPERTIES")[1]
     # a_id is in the KEY, so it should be excluded from PROPERTIES.
@@ -323,25 +370,24 @@ class TestCompileEdgeTableClause:
     """from_columns that are a subset of the entity PK are rejected."""
     src = _make_entity(
         "Src",
-        props=[
-            PropertySpec(name="k1", type="string"),
-            PropertySpec(name="k2", type="int64"),
-        ],
-        keys=["k1", "k2"],
+        props=(
+            ResolvedProperty(column="k1", logical_name="k1", sdk_type="string"),
+            ResolvedProperty(column="k2", logical_name="k2", sdk_type="int64"),
+        ),
+        keys=("k1", "k2"),
         source="p.d.src",
     )
     tgt = _make_entity("Tgt", source="p.d.tgt")
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="R",
+        source="p.d.edges",
         from_entity="Src",
         to_entity="Tgt",
-        binding=BindingSpec(
-            source="p.d.edges",
-            from_columns=["k2"],
-            to_columns=["eid"],
-        ),
+        from_columns=("k2",),
+        to_columns=("eid",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[src, tgt], relationships=[rel])
+    spec = ResolvedGraph(name="g", entities=(src, tgt), relationships=(rel,))
     with pytest.raises(
         ValueError, match="from_columns.*do not match.*primary key"
     ):
@@ -352,24 +398,23 @@ class TestCompileEdgeTableClause:
     src = _make_entity("Src", source="p.d.src")
     tgt = _make_entity(
         "Tgt",
-        props=[
-            PropertySpec(name="t1", type="string"),
-            PropertySpec(name="t2", type="string"),
-        ],
-        keys=["t1", "t2"],
+        props=(
+            ResolvedProperty(column="t1", logical_name="t1", sdk_type="string"),
+            ResolvedProperty(column="t2", logical_name="t2", sdk_type="string"),
+        ),
+        keys=("t1", "t2"),
         source="p.d.tgt",
     )
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="R",
+        source="p.d.edges",
         from_entity="Src",
         to_entity="Tgt",
-        binding=BindingSpec(
-            source="p.d.edges",
-            from_columns=["eid"],
-            to_columns=["t1"],
-        ),
+        from_columns=("eid",),
+        to_columns=("t1",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[src, tgt], relationships=[rel])
+    spec = ResolvedGraph(name="g", entities=(src, tgt), relationships=(rel,))
     with pytest.raises(
         ValueError, match="to_columns.*do not match.*primary key"
     ):
@@ -379,25 +424,24 @@ class TestCompileEdgeTableClause:
     """from_columns == entity PK passes validation."""
     src = _make_entity(
         "Src",
-        props=[
-            PropertySpec(name="k1", type="string"),
-            PropertySpec(name="k2", type="int64"),
-        ],
-        keys=["k1", "k2"],
+        props=(
+            ResolvedProperty(column="k1", logical_name="k1", sdk_type="string"),
+            ResolvedProperty(column="k2", logical_name="k2", sdk_type="int64"),
+        ),
+        keys=("k1", "k2"),
         source="p.d.src",
     )
     tgt = _make_entity("Tgt", source="p.d.tgt")
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="R",
+        source="p.d.edges",
         from_entity="Src",
         to_entity="Tgt",
-        binding=BindingSpec(
-            source="p.d.edges",
-            from_columns=["k1", "k2"],
-            to_columns=["eid"],
-        ),
+        from_columns=("k1", "k2"),
+        to_columns=("eid",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[src, tgt], relationships=[rel])
+    spec = ResolvedGraph(name="g", entities=(src, tgt), relationships=(rel,))
     clause = compile_edge_table_clause(rel, spec, "proj", "ds")
     assert (
         "SOURCE KEY (k1, k2, session_id) " "REFERENCES Src (k1, k2, session_id)"
@@ -431,17 +475,17 @@ class TestCompilePropertyGraphDdl:
 
   def test_no_relationships(self):
     """Spec with entities but no relationships omits EDGE TABLES block."""
-    spec = GraphSpec(
+    spec = ResolvedGraph(
         name="nodes_only",
-        entities=[_make_entity("A", source="p.d.a")],
-        relationships=[],
+        entities=(_make_entity("A", source="p.d.a"),),
+        relationships=(),
     )
     ddl = compile_property_graph_ddl(spec, "proj", "ds")
     assert "NODE TABLES" in ddl
     assert "EDGE TABLES" not in ddl
 
   def test_no_entities_raises(self):
-    spec = GraphSpec(name="empty", entities=[], relationships=[])
+    spec = ResolvedGraph(name="empty", entities=(), relationships=())
     with pytest.raises(ValueError, match="no entities"):
       compile_property_graph_ddl(spec, "proj", "ds")
 
@@ -453,7 +497,7 @@ class TestCompilePropertyGraphDdl:
         "examples",
         "ymgo_graph_spec.yaml",
     )
-    spec = load_graph_spec(demo_path, env="p.d")
+    spec = load_resolved_graph(demo_path, env="p.d")
     ddl = compile_property_graph_ddl(spec, "proj", "ds")
     assert "CREATE OR REPLACE PROPERTY GRAPH" in ddl
     # All 3 entities.

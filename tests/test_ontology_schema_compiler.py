@@ -21,16 +21,14 @@ import os
 
 import pytest
 
-from bigquery_agent_analytics.ontology_models import BindingSpec
-from bigquery_agent_analytics.ontology_models import EntitySpec
-from bigquery_agent_analytics.ontology_models import GraphSpec
-from bigquery_agent_analytics.ontology_models import KeySpec
-from bigquery_agent_analytics.ontology_models import load_graph_spec
-from bigquery_agent_analytics.ontology_models import PropertySpec
-from bigquery_agent_analytics.ontology_models import RelationshipSpec
 from bigquery_agent_analytics.ontology_schema_compiler import _bq_schema_type
 from bigquery_agent_analytics.ontology_schema_compiler import compile_extraction_prompt
 from bigquery_agent_analytics.ontology_schema_compiler import compile_output_schema
+from bigquery_agent_analytics.resolved_spec import load_resolved_graph
+from bigquery_agent_analytics.resolved_spec import ResolvedEntity
+from bigquery_agent_analytics.resolved_spec import ResolvedGraph
+from bigquery_agent_analytics.resolved_spec import ResolvedProperty
+from bigquery_agent_analytics.resolved_spec import ResolvedRelationship
 
 # ------------------------------------------------------------------ #
 # Helpers                                                              #
@@ -38,14 +36,16 @@ from bigquery_agent_analytics.ontology_schema_compiler import compile_output_sch
 
 
 def _make_entity(name, props=None, keys=None):
-  props = props or [PropertySpec(name="eid", type="string")]
-  keys = keys or ["eid"]
-  return EntitySpec(
+  props = props or (
+      ResolvedProperty(column="eid", logical_name="eid", sdk_type="string"),
+  )
+  keys = keys or ("eid",)
+  return ResolvedEntity(
       name=name,
-      binding=BindingSpec(source="p.d.t"),
-      keys=KeySpec(primary=keys),
+      source="p.d.t",
+      key_columns=keys,
       properties=props,
-      labels=[name],
+      labels=(name,),
   )
 
 
@@ -53,35 +53,45 @@ def _simple_spec():
   """Two entities, one relationship."""
   a = _make_entity(
       "Alpha",
-      props=[
-          PropertySpec(name="alpha_id", type="string"),
-          PropertySpec(name="score", type="double"),
-      ],
-      keys=["alpha_id"],
+      props=(
+          ResolvedProperty(
+              column="alpha_id", logical_name="alpha_id", sdk_type="string"
+          ),
+          ResolvedProperty(
+              column="score", logical_name="score", sdk_type="double"
+          ),
+      ),
+      keys=("alpha_id",),
   )
   b = _make_entity(
       "Beta",
-      props=[
-          PropertySpec(name="beta_id", type="string"),
-          PropertySpec(name="active", type="bool"),
-      ],
-      keys=["beta_id"],
+      props=(
+          ResolvedProperty(
+              column="beta_id", logical_name="beta_id", sdk_type="string"
+          ),
+          ResolvedProperty(
+              column="active", logical_name="active", sdk_type="bool"
+          ),
+      ),
+      keys=("beta_id",),
   )
-  rel = RelationshipSpec(
+  rel = ResolvedRelationship(
       name="AlphaToBeta",
+      source="p.d.edges",
       from_entity="Alpha",
       to_entity="Beta",
-      binding=BindingSpec(
-          source="p.d.edges",
-          from_columns=["alpha_id"],
-          to_columns=["beta_id"],
+      from_columns=("alpha_id",),
+      to_columns=("beta_id",),
+      properties=(
+          ResolvedProperty(
+              column="weight", logical_name="weight", sdk_type="double"
+          ),
       ),
-      properties=[PropertySpec(name="weight", type="double")],
   )
-  return GraphSpec(
+  return ResolvedGraph(
       name="test_graph",
-      entities=[a, b],
-      relationships=[rel],
+      entities=(a, b),
+      relationships=(rel,),
   )
 
 
@@ -186,25 +196,28 @@ class TestCompileOutputSchema:
     """Multi-column primary keys appear as separate properties."""
     entity = _make_entity(
         "Multi",
-        props=[
-            PropertySpec(name="k1", type="string"),
-            PropertySpec(name="k2", type="int64"),
-            PropertySpec(name="val", type="double"),
-        ],
-        keys=["k1", "k2"],
+        props=(
+            ResolvedProperty(column="k1", logical_name="k1", sdk_type="string"),
+            ResolvedProperty(column="k2", logical_name="k2", sdk_type="int64"),
+            ResolvedProperty(
+                column="val", logical_name="val", sdk_type="double"
+            ),
+        ),
+        keys=("k1", "k2"),
     )
     other = _make_entity("Other")
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="R",
+        source="p.d.edges",
         from_entity="Multi",
         to_entity="Other",
-        binding=BindingSpec(
-            source="p.d.edges",
-            from_columns=["k1", "k2"],
-            to_columns=["eid"],
-        ),
+        from_columns=("k1", "k2"),
+        to_columns=("eid",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[entity, other], relationships=[rel])
+    spec = ResolvedGraph(
+        name="g", entities=(entity, other), relationships=(rel,)
+    )
     parsed = json.loads(compile_output_schema(spec))
     from_keys = parsed["properties"]["edges"]["items"]["properties"][
         "from_keys"
@@ -248,7 +261,7 @@ class TestCompileOutputSchema:
       compile_output_schema(_simple_spec(), entity_names=["NotHere"])
 
   def test_no_entities_produces_empty_arrays(self):
-    spec = GraphSpec(name="empty")
+    spec = ResolvedGraph(name="empty", entities=(), relationships=())
     parsed = json.loads(compile_output_schema(spec))
     node_props = parsed["properties"]["nodes"]["items"]["properties"]
     # Only entity_name, no user properties.
@@ -257,10 +270,14 @@ class TestCompileOutputSchema:
   def test_unsupported_property_type_raises(self):
     entity = _make_entity(
         "Bad",
-        props=[PropertySpec(name="x", type="array<string>")],
-        keys=["x"],
+        props=(
+            ResolvedProperty(
+                column="x", logical_name="x", sdk_type="array<string>"
+            ),
+        ),
+        keys=("x",),
     )
-    spec = GraphSpec(name="g", entities=[entity])
+    spec = ResolvedGraph(name="g", entities=(entity,), relationships=())
     with pytest.raises(ValueError, match="Unsupported property type"):
       compile_output_schema(spec)
 
@@ -272,7 +289,7 @@ class TestCompileOutputSchema:
         "examples",
         "ymgo_graph_spec.yaml",
     )
-    spec = load_graph_spec(demo_path, env="p.d")
+    spec = load_resolved_graph(demo_path, env="p.d")
     schema_str = compile_output_schema(spec)
     parsed = json.loads(schema_str)
     node_props = parsed["properties"]["nodes"]["items"]["properties"]
@@ -294,51 +311,75 @@ class TestCompileOutputSchema:
     """Same property name + same type across entities is OK."""
     a = _make_entity(
         "A",
-        props=[PropertySpec(name="shared", type="string")],
-        keys=["shared"],
+        props=(
+            ResolvedProperty(
+                column="shared", logical_name="shared", sdk_type="string"
+            ),
+        ),
+        keys=("shared",),
     )
     b = _make_entity(
         "B",
-        props=[PropertySpec(name="shared", type="string")],
-        keys=["shared"],
+        props=(
+            ResolvedProperty(
+                column="shared", logical_name="shared", sdk_type="string"
+            ),
+        ),
+        keys=("shared",),
     )
-    spec = GraphSpec(name="g", entities=[a, b])
+    spec = ResolvedGraph(name="g", entities=(a, b), relationships=())
     # Should not raise.
     compile_output_schema(spec)
 
   def test_node_property_type_collision_raises(self):
     a = _make_entity(
         "A",
-        props=[PropertySpec(name="val", type="string")],
-        keys=["val"],
+        props=(
+            ResolvedProperty(
+                column="val", logical_name="val", sdk_type="string"
+            ),
+        ),
+        keys=("val",),
     )
     b = _make_entity(
         "B",
-        props=[PropertySpec(name="val", type="int64")],
-        keys=["val"],
+        props=(
+            ResolvedProperty(
+                column="val", logical_name="val", sdk_type="int64"
+            ),
+        ),
+        keys=("val",),
     )
-    spec = GraphSpec(name="g", entities=[a, b])
+    spec = ResolvedGraph(name="g", entities=(a, b), relationships=())
     with pytest.raises(ValueError, match="Property name collision.*val"):
       compile_output_schema(spec)
 
   def test_edge_property_type_collision_raises(self):
     a = _make_entity("A")
     b = _make_entity("B")
-    r1 = RelationshipSpec(
+    r1 = ResolvedRelationship(
         name="R1",
+        source="p.d.t",
         from_entity="A",
         to_entity="B",
-        binding=BindingSpec(source="p.d.t"),
-        properties=[PropertySpec(name="w", type="double")],
+        from_columns=("eid",),
+        to_columns=("eid",),
+        properties=(
+            ResolvedProperty(column="w", logical_name="w", sdk_type="double"),
+        ),
     )
-    r2 = RelationshipSpec(
+    r2 = ResolvedRelationship(
         name="R2",
+        source="p.d.t2",
         from_entity="A",
         to_entity="B",
-        binding=BindingSpec(source="p.d.t2"),
-        properties=[PropertySpec(name="w", type="string")],
+        from_columns=("eid",),
+        to_columns=("eid",),
+        properties=(
+            ResolvedProperty(column="w", logical_name="w", sdk_type="string"),
+        ),
     )
-    spec = GraphSpec(name="g", entities=[a, b], relationships=[r1, r2])
+    spec = ResolvedGraph(name="g", entities=(a, b), relationships=(r1, r2))
     with pytest.raises(ValueError, match="Property name collision.*w"):
       compile_output_schema(spec)
 
@@ -381,23 +422,28 @@ class TestCompileExtractionPrompt:
     assert "Beta" not in prompt.split("Relationship types:")[0]
 
   def test_no_relationships_section_when_empty(self):
-    spec = GraphSpec(
+    spec = ResolvedGraph(
         name="g",
-        entities=[_make_entity("Solo")],
+        entities=(_make_entity("Solo"),),
+        relationships=(),
     )
     prompt = compile_extraction_prompt(spec)
     assert "Relationship types:" not in prompt
 
   def test_entity_description_included(self):
-    entity = EntitySpec(
+    entity = ResolvedEntity(
         name="Thing",
         description="A test thing.",
-        binding=BindingSpec(source="p.d.t"),
-        keys=KeySpec(primary=["tid"]),
-        properties=[PropertySpec(name="tid", type="string")],
-        labels=["Thing"],
+        source="p.d.t",
+        key_columns=("tid",),
+        properties=(
+            ResolvedProperty(
+                column="tid", logical_name="tid", sdk_type="string"
+            ),
+        ),
+        labels=("Thing",),
     )
-    spec = GraphSpec(name="g", entities=[entity])
+    spec = ResolvedGraph(name="g", entities=(entity,), relationships=())
     prompt = compile_extraction_prompt(spec)
     assert "A test thing." in prompt
 
@@ -408,7 +454,7 @@ class TestCompileExtractionPrompt:
         "examples",
         "ymgo_graph_spec.yaml",
     )
-    spec = load_graph_spec(demo_path, env="p.d")
+    spec = load_resolved_graph(demo_path, env="p.d")
     prompt = compile_extraction_prompt(spec)
     assert "mako_DecisionPoint" in prompt
     assert "CandidateEdge" in prompt

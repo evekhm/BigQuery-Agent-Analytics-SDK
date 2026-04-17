@@ -13,7 +13,9 @@ artifacts that demonstrate SDK capabilities.
 | [ai_ml_integration_demo.ipynb](ai_ml_integration_demo.ipynb) | AI.GENERATE, AI.EMBED, anomaly detection |
 | [categorical_evaluation_demo.ipynb](categorical_evaluation_demo.ipynb) | Hatteras categorical evaluation |
 | [context_graph_adcp_demo.ipynb](context_graph_adcp_demo.ipynb) | Property Graph use cases |
-| [ontology_graph_v4_demo.ipynb](ontology_graph_v4_demo.ipynb) | Ontology extraction + GQL |
+| [ontology_graph_v5_demo.ipynb](ontology_graph_v5_demo.ipynb) | OWL import, mixed extraction, temporal lineage, GQL |
+| [migration_v5_demo_notebook.ipynb](migration_v5_demo_notebook.ipynb) | Migrated V5 pipeline using separated ontology + binding |
+| [ontology_graph_v4_demo.ipynb](ontology_graph_v4_demo.ipynb) | Ontology extraction + GQL **(legacy)** |
 | [memory_service_demo.ipynb](memory_service_demo.ipynb) | Cross-session memory |
 | [event_semantics_views_bigframes_demo.ipynb](event_semantics_views_bigframes_demo.ipynb) | Event views + BigFrames |
 | [nba_agent_trace_analysis_notebook.ipynb](nba_agent_trace_analysis_notebook.ipynb) | Real-world trace analysis |
@@ -50,4 +52,9 @@ artifacts that demonstrate SDK capabilities.
 | File | Description |
 |------|-------------|
 | [e2e_demo_output.txt](e2e_demo_output.txt) | Expected output from e2e_demo.py |
-| [ymgo_graph_spec.yaml](ymgo_graph_spec.yaml) | Example ontology YAML specification |
+| [ymgo_graph_spec.yaml](ymgo_graph_spec.yaml) | Example ontology YAML specification **(legacy)** |
+
+> **Note:** `ontology_graph_v4_demo.ipynb` and `ymgo_graph_spec.yaml` use the legacy combined
+> `GraphSpec` format. The current approach uses separated ontology + binding YAML files with
+> `load_ontology()` + `load_binding()` from `bigquery_ontology`. See `ontology_graph_v5_demo.ipynb`
+> or `migration_v5_demo_notebook.ipynb`.

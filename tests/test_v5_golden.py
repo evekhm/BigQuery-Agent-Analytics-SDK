@@ -41,6 +41,7 @@ from bigquery_agent_analytics.ontology_models import load_graph_spec_from_string
 from bigquery_agent_analytics.ontology_models import PropertySpec
 from bigquery_agent_analytics.ontology_models import RelationshipSpec
 from bigquery_agent_analytics.ontology_orchestrator import compile_lineage_gql
+from bigquery_agent_analytics.resolved_spec import resolve_from_graph_spec
 from bigquery_agent_analytics.structured_extraction import extract_bka_decision_event
 from bigquery_agent_analytics.structured_extraction import merge_extraction_results
 from bigquery_agent_analytics.structured_extraction import run_structured_extractors
@@ -163,6 +164,16 @@ def _make_lineage_spec() -> GraphSpec:
       entities=[entity],
       relationships=[lineage_rel],
   )
+
+
+def _resolved_demo_spec():
+  """Return _demo_spec() converted to a ResolvedGraph."""
+  return resolve_from_graph_spec(_demo_spec())
+
+
+def _resolved_lineage_spec():
+  """Return _make_lineage_spec() converted to a ResolvedGraph."""
+  return resolve_from_graph_spec(_make_lineage_spec())
 
 
 # ------------------------------------------------------------------ #
@@ -490,7 +501,7 @@ class TestLineageDetection:
   def test_detect_lineage_edges_finds_changes(self):
     """Compare sess-A and sess-B, find changed properties."""
     sessions = _load_lineage_sessions()
-    spec = _demo_spec()
+    spec = _resolved_demo_spec()
 
     current_graph = _hydrate_lineage_graph(sessions["sess-B"])
     prior_graphs = {
@@ -519,7 +530,7 @@ class TestLineageDetection:
   def test_detect_lineage_edges_no_change(self):
     """Identical nodes across sessions produce no lineage edges."""
     sessions = _load_lineage_sessions()
-    spec = _demo_spec()
+    spec = _resolved_demo_spec()
 
     # Use the same session data for both prior and current.
     current_graph = _hydrate_lineage_graph(sessions["sess-A"])
@@ -539,7 +550,7 @@ class TestLineageDetection:
   def test_detect_lineage_edges_new_entity(self):
     """Entity only in current session (not in prior) produces no edge."""
     sessions = _load_lineage_sessions()
-    spec = _demo_spec()
+    spec = _resolved_demo_spec()
 
     current_graph = _hydrate_lineage_graph(sessions["sess-B"])
     # Prior has no matching entity.
@@ -568,7 +579,7 @@ class TestDDLSessionColumns:
     """Existing behavior unchanged: edge uses session_id for both endpoints."""
     from bigquery_agent_analytics.ontology_property_graph import compile_edge_table_clause
 
-    spec = _demo_spec()
+    spec = _resolved_demo_spec()
     rel = spec.relationships[0]  # CandidateEdge
     clause = compile_edge_table_clause(rel, spec, "proj", "ds")
     assert "SOURCE KEY (decision_id, session_id)" in clause
@@ -601,9 +612,11 @@ class TestDDLSessionColumns:
             PropertySpec(name="changed_properties", type="string"),
         ],
     )
-    spec = GraphSpec(name="g", entities=[entity], relationships=[rel])
+    old_spec = GraphSpec(name="g", entities=[entity], relationships=[rel])
+    spec = resolve_from_graph_spec(old_spec)
+    resolved_rel = spec.relationships[0]
 
-    clause = compile_edge_table_clause(rel, spec, "proj", "ds")
+    clause = compile_edge_table_clause(resolved_rel, spec, "proj", "ds")
     # SOURCE KEY should use from_session_id, not session_id.
     assert "SOURCE KEY (a_id, from_session_id)" in clause
     assert "REFERENCES A (a_id, session_id)" in clause
@@ -621,7 +634,7 @@ class TestMaterializerSessionOwnership:
 
   def test_route_edge_normal(self):
     """Normal edge: session_id set from the session_id parameter."""
-    spec = _demo_spec()
+    spec = _resolved_demo_spec()
     rel = spec.relationships[0]  # CandidateEdge
     edge = ExtractedEdge(
         edge_id="sess-1:CandidateEdge:0",
@@ -644,7 +657,7 @@ class TestMaterializerSessionOwnership:
         keys=["a_id"],
         source="p.d.a_table",
     )
-    rel = RelationshipSpec(
+    old_rel = RelationshipSpec(
         name="AEvolvedFrom",
         from_entity="A",
         to_entity="A",
@@ -661,7 +674,9 @@ class TestMaterializerSessionOwnership:
             PropertySpec(name="changed_properties", type="string"),
         ],
     )
-    spec = GraphSpec(name="g", entities=[entity], relationships=[rel])
+    old_spec = GraphSpec(name="g", entities=[entity], relationships=[old_rel])
+    spec = resolve_from_graph_spec(old_spec)
+    rel = spec.relationships[0]
 
     edge = ExtractedEdge(
         edge_id="sess-B:AEvolvedFrom:sess-A:a_id=x1",
@@ -682,7 +697,7 @@ class TestMaterializerSessionOwnership:
     """Extra AI-emitted properties not in the entity spec are dropped."""
     from bigquery_agent_analytics.ontology_materializer import _route_node
 
-    entity = _make_entity(
+    old_entity = _make_entity(
         "mako_DecisionPoint",
         props=[
             PropertySpec(name="decision_id", type="string"),
@@ -691,6 +706,9 @@ class TestMaterializerSessionOwnership:
         keys=["decision_id"],
         source="p.d.decision_points",
     )
+    old_spec = GraphSpec(name="g", entities=[old_entity], relationships=[])
+    resolved = resolve_from_graph_spec(old_spec)
+    entity = resolved.entities[0]
     node = ExtractedNode(
         node_id="s1:mako_DecisionPoint:decision_id=d1",
         entity_name="mako_DecisionPoint",
@@ -712,7 +730,7 @@ class TestMaterializerSessionOwnership:
 
   def test_route_edge_filters_to_schema(self):
     """Extra AI-emitted edge properties not in the rel spec are dropped."""
-    spec = _demo_spec()
+    spec = _resolved_demo_spec()
     rel = spec.relationships[0]  # CandidateEdge: edge_type, mako_scoreValue
     edge = ExtractedEdge(
         edge_id="s1:CandidateEdge:0",
@@ -771,11 +789,12 @@ class TestLineageGQL:
             PropertySpec(name="changed_properties", type="string"),
         ],
     )
-    spec = GraphSpec(
+    old_spec = GraphSpec(
         name="lineage_graph",
         entities=[entity],
         relationships=[rel],
     )
+    spec = resolve_from_graph_spec(old_spec)
 
     gql = compile_lineage_gql(
         spec=spec,
@@ -879,7 +898,7 @@ class TestPartialHintBuilt:
 
     from bigquery_agent_analytics.ontology_graph import OntologyGraphManager
 
-    spec = _make_lineage_spec()
+    spec = _resolved_lineage_spec()
 
     def fake_extractor(event, spec):
       from bigquery_agent_analytics.structured_extraction import StructuredExtractionResult
@@ -947,7 +966,7 @@ class TestDDLSessionColumnsInProperties:
     even though they are in the edge KEY, so GQL can query them."""
     from bigquery_agent_analytics.ontology_property_graph import compile_edge_table_clause
 
-    spec = _make_lineage_spec()
+    spec = _resolved_lineage_spec()
     rel = next(
         r for r in spec.relationships if r.name == "sup_YahooAdUnitEvolvedFrom"
     )
@@ -999,7 +1018,7 @@ class TestMaterializerWriteMode:
     from bigquery_agent_analytics.ontology_materializer import MaterializationResult
     from bigquery_agent_analytics.ontology_materializer import OntologyMaterializer
 
-    spec = _demo_spec()
+    spec = _resolved_demo_spec()
     mock_client = MagicMock()
     mock_job = MagicMock()
     mock_job.result.return_value = None
@@ -1039,7 +1058,7 @@ class TestMaterializerWriteMode:
 
     from bigquery_agent_analytics.ontology_materializer import OntologyMaterializer
 
-    spec = _demo_spec()
+    spec = _resolved_demo_spec()
     mock_client = MagicMock()
     mock_job = MagicMock()
 
@@ -1106,14 +1125,15 @@ class TestUpstreamDDLBridge:
         keys=["a_id"],
         source="p.d.a_table",
     )
-    spec = GraphSpec(name="g", entities=[entity], relationships=[])
+    old_spec = GraphSpec(name="g", entities=[entity], relationships=[])
+    spec = resolve_from_graph_spec(old_spec)
     assert can_use_upstream_compiler(spec) is True
 
   def test_cannot_use_upstream_with_extends(self):
     """Spec with extends is not compatible with upstream v0."""
     from bigquery_agent_analytics.ontology_property_graph import can_use_upstream_compiler
 
-    spec = _demo_spec()
+    spec = _resolved_demo_spec()
     # YMGO has sup_YahooAdUnit extends mako_Candidate.
     assert can_use_upstream_compiler(spec) is False
 
@@ -1121,7 +1141,7 @@ class TestUpstreamDDLBridge:
     """Spec with session column overrides is not compatible."""
     from bigquery_agent_analytics.ontology_property_graph import can_use_upstream_compiler
 
-    spec = _make_lineage_spec()
+    spec = _resolved_lineage_spec()
     assert can_use_upstream_compiler(spec) is False
 
   def test_compile_via_upstream_flat_spec(self):
@@ -1153,7 +1173,8 @@ class TestUpstreamDDLBridge:
             to_columns=["oid"],
         ),
     )
-    spec = GraphSpec(name="shop", entities=[a, b], relationships=[rel])
+    old_spec = GraphSpec(name="shop", entities=[a, b], relationships=[rel])
+    spec = resolve_from_graph_spec(old_spec)
     ddl = compile_ddl_via_upstream(spec, "p", "d")
     assert "CREATE PROPERTY GRAPH" in ddl
     assert "NODE TABLES" in ddl
@@ -1166,7 +1187,7 @@ class TestUpstreamDDLBridge:
     """Upstream compiler rejects extends."""
     from bigquery_agent_analytics.ontology_property_graph import compile_ddl_via_upstream
 
-    spec = _demo_spec()
+    spec = _resolved_demo_spec()
     with pytest.raises(ValueError, match="extends"):
       compile_ddl_via_upstream(spec, "p", "d")
 
@@ -1174,6 +1195,6 @@ class TestUpstreamDDLBridge:
     """Upstream compiler rejects lineage session column overrides."""
     from bigquery_agent_analytics.ontology_property_graph import compile_ddl_via_upstream
 
-    spec = _make_lineage_spec()
+    spec = _resolved_lineage_spec()
     with pytest.raises(ValueError, match="session column overrides"):
       compile_ddl_via_upstream(spec, "p", "d")
