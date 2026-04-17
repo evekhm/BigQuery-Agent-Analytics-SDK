@@ -834,13 +834,9 @@ def strip_markdown_fences(text: Optional[str]) -> Optional[str]:
   text = text.strip()
   if not text.startswith("```"):
     return text
-  text = re.sub(r"^```[a-zA-Z]*\s*\n?", "", text)
-  text = re.sub(r"\n?\s*```\s*$", "", text)
+  text = re.sub(r"^```[a-zA-Z0-9]*\s*\n?", "", text)
+  text = re.sub(r"\n?\s*```[\s\S]*$", "", text)
   return text.strip()
-
-
-# Backwards-compatible alias
-_strip_markdown_fences = strip_markdown_fences
 
 
 def _parse_json_from_text(text: str) -> Optional[dict[str, Any]]:

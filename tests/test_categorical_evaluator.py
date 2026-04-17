@@ -412,7 +412,7 @@ class TestParseClassifications:
 
 
 # ------------------------------------------------------------------ #
-# _strip_markdown_fences Tests                                         #
+# strip_markdown_fences Tests                                          #
 # ------------------------------------------------------------------ #
 
 
@@ -475,10 +475,18 @@ class TestStripMarkdownFences:
 
     assert strip_markdown_fences('```json\n{"a": 1}') == '{"a": 1}'
 
-  def test_backwards_compat_alias(self):
-    from bigquery_agent_analytics.evaluators import _strip_markdown_fences
+  def test_trailing_content_after_fence(self):
+    from bigquery_agent_analytics.evaluators import strip_markdown_fences
 
-    assert _strip_markdown_fences('```json\n{"a": 1}\n```') == '{"a": 1}'
+    result = strip_markdown_fences(
+        '```json\n{"score": 1}\n```\nHere\'s my analysis...'
+    )
+    assert result == '{"score": 1}'
+
+  def test_language_tag_with_digits(self):
+    from bigquery_agent_analytics.evaluators import strip_markdown_fences
+
+    assert strip_markdown_fences("```json5\n{}\n```") == "{}"
 
 
 # ------------------------------------------------------------------ #

@@ -819,8 +819,11 @@ Required JSON format:
       response_text = response.text.strip()
 
       # Strip markdown fences and extract JSON
-      json_str = strip_markdown_fences(response_text)
-      if not json_str or not response_text.startswith("```"):
+      if response_text.startswith("```"):
+        json_str = strip_markdown_fences(response_text)
+      else:
+        json_str = None
+      if not json_str:
         # No fences found — try to extract JSON object directly
         if "{" in response_text:
           try:
