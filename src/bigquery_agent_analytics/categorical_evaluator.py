@@ -129,6 +129,8 @@ class CategoricalEvaluationConfig(BaseModel):
   )
   max_output_tokens: int = Field(
       default=8192,
+      ge=1,
+      le=65536,
       description="Max output tokens for classification response.",
   )
   prompt_version: Optional[str] = Field(
@@ -883,7 +885,7 @@ async def classify_sessions_via_api(
         )
       except Exception as e:
         logger.warning(
-            "Categorical API classification EXCEPTION for %s: %s " "(type=%s)",
+            "Categorical API classification EXCEPTION for %s: %s (type=%s)",
             sid,
             e,
             type(e).__name__,

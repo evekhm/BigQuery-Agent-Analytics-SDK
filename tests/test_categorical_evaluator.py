@@ -1505,7 +1505,7 @@ class TestRetryNullSessions:
 
     with patch(
         "bigquery_agent_analytics.client._run_sync",
-        side_effect=Exception("API down"),
+        side_effect=RuntimeError("API down"),
     ):
       results = client._retry_null_sessions(
           transcripts,
@@ -1620,7 +1620,7 @@ class TestRetryNullSessions:
         "_retry_null_sessions",
         return_value=[retry_result],
     ) as mock_retry:
-      results = client._categorical_ai_generate(
+      results, retry_meta = client._categorical_ai_generate(
           config,
           "t",
           "1=1",
@@ -1633,6 +1633,8 @@ class TestRetryNullSessions:
     assert "s2" in call_args[0][0]
     assert "s1" not in call_args[0][0]
     assert len(results) == 2
+    assert retry_meta["null_count"] == 1
+    assert retry_meta["retry_attempted"] is True
 
   def test_ai_generate_no_retry_when_all_succeed(self):
     """When all rows have classifications, no retry should happen."""
@@ -1660,7 +1662,7 @@ class TestRetryNullSessions:
         client,
         "_retry_null_sessions",
     ) as mock_retry:
-      results = client._categorical_ai_generate(
+      results, retry_meta = client._categorical_ai_generate(
           config,
           "t",
           "1=1",
@@ -1671,6 +1673,7 @@ class TestRetryNullSessions:
     mock_retry.assert_not_called()
     assert len(results) == 1
     assert results[0].metrics[0].category == "positive"
+    assert retry_meta == {}
 
   def test_ai_generate_null_without_transcript_skips_retry(self):
     """NULL classifications with no transcript should NOT be retried."""
@@ -1691,7 +1694,7 @@ class TestRetryNullSessions:
         client,
         "_retry_null_sessions",
     ) as mock_retry:
-      results = client._categorical_ai_generate(
+      results, retry_meta = client._categorical_ai_generate(
           config,
           "t",
           "1=1",
@@ -1701,3 +1704,4 @@ class TestRetryNullSessions:
 
     mock_retry.assert_not_called()
     assert len(results) == 1
+    assert retry_meta == {}

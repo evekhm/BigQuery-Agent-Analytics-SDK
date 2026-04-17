@@ -1250,7 +1250,7 @@ class Client:
 
     # Try AI.GENERATE.
     try:
-      session_results = self._categorical_ai_generate(
+      session_results, retry_meta = self._categorical_ai_generate(
           config,
           table,
           where,
@@ -1264,6 +1264,8 @@ class Client:
           config=config,
       )
       report.details["execution_mode"] = "ai_generate"
+      if retry_meta:
+        report.details["retry"] = retry_meta
       if classify_fallback_reason:
         report.details["classify_fallback_reason"] = classify_fallback_reason
       self._persist_categorical_if_configured(report, config, endpoint)
@@ -1398,6 +1400,7 @@ class Client:
         null_sessions[sid] = r.get("transcript", "")
       session_results.append(parsed)
 
+    retry_meta = {}
     if null_sessions:
       logger.warning(
           "AI.GENERATE returned NULL for %d sessions, "
@@ -1410,21 +1413,28 @@ class Client:
           endpoint,
           max_retries=3,
       )
+      resolved = 0
       if retried:
         retried_map = {r.session_id: r for r in retried}
         session_results = [
             retried_map.get(sr.session_id, sr) for sr in session_results
         ]
-        success = sum(
+        resolved = sum(
             1 for r in retried if not any(m.parse_error for m in r.metrics)
         )
         logger.info(
             "Gemini API retry resolved %d/%d NULL sessions",
-            success,
+            resolved,
             len(null_sessions),
         )
+      retry_meta = {
+          "null_count": len(null_sessions),
+          "retry_attempted": True,
+          "retry_resolved": resolved,
+          "retry_unresolved": len(null_sessions) - resolved,
+      }
 
-    return session_results
+    return session_results, retry_meta
 
   def _retry_null_sessions(
       self,
@@ -1451,6 +1461,14 @@ class Client:
     for attempt in range(1, max_retries + 1):
       if not remaining:
         break
+      if attempt > 1:
+        import time
+
+        backoff = 2 ** (attempt - 2)
+        logger.info(
+            "Retry backoff: sleeping %ds before attempt %d", backoff, attempt
+        )
+        time.sleep(backoff)
       try:
         results = _run_sync(
             classify_sessions_via_api(remaining, config, endpoint)
@@ -1480,11 +1498,12 @@ class Client:
               attempt,
               len(remaining),
           )
-      except Exception as e:
+      except (RuntimeError, ValueError, OSError) as e:
         logger.warning(
-            "Gemini API retry attempt %d failed: %s",
+            "Gemini API retry attempt %d failed: %s (type=%s)",
             attempt,
             e,
+            type(e).__name__,
         )
 
     if remaining:
