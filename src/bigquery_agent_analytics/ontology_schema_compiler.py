@@ -14,7 +14,7 @@
 
 """Schema compiler for ontology-driven AI.GENERATE extraction.
 
-Converts a validated ``GraphSpec`` into a BigQuery ``output_schema``
+Converts a validated ``ResolvedGraph`` into a BigQuery ``output_schema``
 JSON string compatible with ``AI.GENERATE``.  The generated schema
 instructs the LLM to return a structured object with ``nodes`` and
 ``edges`` arrays, each typed according to the ontology.
@@ -25,12 +25,12 @@ property fields).
 
 Example usage::
 
-    from bigquery_agent_analytics.ontology_models import load_graph_spec
+    from bigquery_agent_analytics.resolved_spec import load_resolved_graph
     from bigquery_agent_analytics.ontology_schema_compiler import (
         compile_output_schema,
     )
 
-    spec = load_graph_spec("examples/ymgo_graph_spec.yaml", env="p.d")
+    spec = load_resolved_graph("examples/ymgo_graph_spec.yaml", env="p.d")
     schema_json = compile_output_schema(spec)
     # Use in: AI.GENERATE(..., output_schema => '{schema_json}')
 """
@@ -41,9 +41,9 @@ import json
 import logging
 from typing import Optional
 
-from .ontology_models import EntitySpec
-from .ontology_models import GraphSpec
-from .ontology_models import RelationshipSpec
+from .resolved_spec import ResolvedEntity
+from .resolved_spec import ResolvedGraph
+from .resolved_spec import ResolvedRelationship
 
 logger = logging.getLogger("bigquery_agent_analytics." + __name__)
 
@@ -84,20 +84,20 @@ def _bq_schema_type(yaml_type: str) -> str:
 # ------------------------------------------------------------------ #
 
 
-def _compile_entity_schema(entity: EntitySpec) -> dict:
+def _compile_entity_schema(entity: ResolvedEntity) -> dict:
   """Build the JSON Schema object for a single entity type."""
   props: dict = {
       "entity_name": {"type": "STRING"},
   }
   for prop in entity.properties:
-    props[prop.name] = {"type": _bq_schema_type(prop.type)}
+    props[prop.column] = {"type": _bq_schema_type(prop.sdk_type)}
   return {
       "type": "OBJECT",
       "properties": props,
   }
 
 
-def _compile_relationship_schema(rel: RelationshipSpec) -> dict:
+def _compile_relationship_schema(rel: ResolvedRelationship) -> dict:
   """Build the JSON Schema object for a single relationship type."""
   props: dict = {
       "relationship_name": {"type": "STRING"},
@@ -113,7 +113,7 @@ def _compile_relationship_schema(rel: RelationshipSpec) -> dict:
       },
   }
   for prop in rel.properties:
-    props[prop.name] = {"type": _bq_schema_type(prop.type)}
+    props[prop.column] = {"type": _bq_schema_type(prop.sdk_type)}
   return {
       "type": "OBJECT",
       "properties": props,
@@ -121,10 +121,10 @@ def _compile_relationship_schema(rel: RelationshipSpec) -> dict:
 
 
 def compile_output_schema(
-    spec: GraphSpec,
+    spec: ResolvedGraph,
     entity_names: Optional[list[str]] = None,
 ) -> str:
-  """Compile a ``GraphSpec`` into a BQ ``output_schema`` JSON string.
+  """Compile a ``ResolvedGraph`` into a BQ ``output_schema`` JSON string.
 
   The output schema instructs ``AI.GENERATE`` to return::
 
@@ -148,7 +148,7 @@ def compile_output_schema(
   This preserves composite keys for downstream routing/DDL phases.
 
   Args:
-      spec: A validated ``GraphSpec``.
+      spec: A validated ``ResolvedGraph``.
       entity_names: Optional subset of entity names to include.
           If ``None``, all entities and relationships are included.
 
@@ -191,17 +191,17 @@ def compile_output_schema(
   node_type_registry: dict[str, tuple[str, str]] = {}
   for entity in entities:
     for prop in entity.properties:
-      bq_type = _bq_schema_type(prop.type)
-      if prop.name in node_type_registry:
-        prev_type, prev_entity = node_type_registry[prop.name]
+      bq_type = _bq_schema_type(prop.sdk_type)
+      if prop.column in node_type_registry:
+        prev_type, prev_entity = node_type_registry[prop.column]
         if prev_type != bq_type:
           raise ValueError(
-              f"Property name collision: {prop.name!r} has type "
+              f"Property name collision: {prop.column!r} has type "
               f"{prev_type} in entity {prev_entity!r} but type "
               f"{bq_type} in entity {entity.name!r}."
           )
-      node_type_registry[prop.name] = (bq_type, entity.name)
-      node_props[prop.name] = {"type": bq_type}
+      node_type_registry[prop.column] = (bq_type, entity.name)
+      node_props[prop.column] = {"type": bq_type}
 
   # Edge structural fields + composite key objects.
   # from_keys/to_keys are typed per-relationship based on the
@@ -211,14 +211,14 @@ def compile_output_schema(
   for rel in relationships:
     src = entity_map[rel.from_entity]
     tgt = entity_map[rel.to_entity]
-    src_prop_map = {p.name: p for p in src.properties}
-    tgt_prop_map = {p.name: p for p in tgt.properties}
-    for col in src.keys.primary:
+    src_prop_map = {p.column: p for p in src.properties}
+    tgt_prop_map = {p.column: p for p in tgt.properties}
+    for col in src.key_columns:
       prop = src_prop_map[col]
-      from_key_props[col] = {"type": _bq_schema_type(prop.type)}
-    for col in tgt.keys.primary:
+      from_key_props[col] = {"type": _bq_schema_type(prop.sdk_type)}
+    for col in tgt.key_columns:
       prop = tgt_prop_map[col]
-      to_key_props[col] = {"type": _bq_schema_type(prop.type)}
+      to_key_props[col] = {"type": _bq_schema_type(prop.sdk_type)}
 
   edge_props: dict = {
       "relationship_name": {"type": "STRING"},
@@ -237,17 +237,17 @@ def compile_output_schema(
   edge_type_registry: dict[str, tuple[str, str]] = {}
   for rel in relationships:
     for prop in rel.properties:
-      bq_type = _bq_schema_type(prop.type)
-      if prop.name in edge_type_registry:
-        prev_type, prev_rel = edge_type_registry[prop.name]
+      bq_type = _bq_schema_type(prop.sdk_type)
+      if prop.column in edge_type_registry:
+        prev_type, prev_rel = edge_type_registry[prop.column]
         if prev_type != bq_type:
           raise ValueError(
-              f"Property name collision: {prop.name!r} has type "
+              f"Property name collision: {prop.column!r} has type "
               f"{prev_type} in relationship {prev_rel!r} but type "
               f"{bq_type} in relationship {rel.name!r}."
           )
-      edge_type_registry[prop.name] = (bq_type, rel.name)
-      edge_props[prop.name] = {"type": bq_type}
+      edge_type_registry[prop.column] = (bq_type, rel.name)
+      edge_props[prop.column] = {"type": bq_type}
 
   schema = {
       "type": "OBJECT",
@@ -273,7 +273,7 @@ def compile_output_schema(
 
 
 def compile_extraction_prompt(
-    spec: GraphSpec,
+    spec: ResolvedGraph,
     entity_names: Optional[list[str]] = None,
 ) -> str:
   """Generate an extraction prompt for ``AI.GENERATE``.
@@ -282,7 +282,7 @@ def compile_extraction_prompt(
   conforming to the ontology definition.
 
   Args:
-      spec: A validated ``GraphSpec``.
+      spec: A validated ``ResolvedGraph``.
       entity_names: Optional subset of entity names.
 
   Returns:
@@ -309,7 +309,7 @@ def compile_extraction_prompt(
       "Entity types:",
   ]
   for entity in entities:
-    prop_list = ", ".join(p.name for p in entity.properties)
+    prop_list = ", ".join(p.column for p in entity.properties)
     desc = f" — {entity.description}" if entity.description else ""
     lines.append(f"  - {entity.name}{desc} (properties: {prop_list})")
 
@@ -317,7 +317,7 @@ def compile_extraction_prompt(
     lines.append("")
     lines.append("Relationship types:")
     for rel in relationships:
-      prop_list = ", ".join(p.name for p in rel.properties)
+      prop_list = ", ".join(p.column for p in rel.properties)
       desc = f" — {rel.description}" if rel.description else ""
       props_str = f" (properties: {prop_list})" if prop_list else ""
       lines.append(

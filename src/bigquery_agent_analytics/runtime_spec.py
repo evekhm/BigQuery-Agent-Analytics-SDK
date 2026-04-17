@@ -507,3 +507,171 @@ def graph_spec_to_ontology_binding(
   )
 
   return ontology, binding_obj, lineage_config
+
+
+# ------------------------------------------------------------------ #
+# Reverse: ResolvedGraph -> (Ontology, Binding, lineage_config)       #
+# ------------------------------------------------------------------ #
+
+
+def resolved_graph_to_ontology_binding(
+    spec,
+    ontology_name: str = 'converted',
+    binding_name: str = 'converted_binding',
+    project_id: str = '',
+    dataset_id: str = '',
+) -> tuple[Ontology, Binding, dict[str, LineageEdgeConfig]]:
+  """Convert a ``ResolvedGraph`` back to separated Ontology + Binding.
+
+  Analogous to ``graph_spec_to_ontology_binding`` but reads from the
+  resolved dataclass fields (``source``, ``key_columns``,
+  ``from_columns``, etc.) instead of the legacy GraphSpec nested
+  ``binding`` objects.
+
+  Args:
+      spec: A ``ResolvedGraph`` instance.
+      ontology_name: Name for the generated Ontology document.
+      binding_name: Name for the generated Binding document.
+      project_id: BigQuery project for the binding target.
+      dataset_id: BigQuery dataset for the binding target.
+
+  Returns:
+      A ``(Ontology, Binding, lineage_config)`` tuple.
+  """
+  # -- Infer project/dataset from first entity source if not supplied --
+  if (not project_id or not dataset_id) and spec.entities:
+    parts = spec.entities[0].source.split('.')
+    if len(parts) >= 3:
+      if not project_id:
+        project_id = parts[0]
+      if not dataset_id:
+        dataset_id = parts[1]
+  project_id = project_id or 'default_project'
+  dataset_id = dataset_id or 'default_dataset'
+
+  target_prefix = f'{project_id}.{dataset_id}.'
+
+  # -- Entities --------------------------------------------------------
+  ont_entities: list[Entity] = []
+  bnd_entities: list[EntityBinding] = []
+
+  for es in spec.entities:
+    ont_props = [
+        Property(
+            name=p.logical_name,
+            type=_sdk_type_to_property_type(p.sdk_type),
+            description=p.description or None,
+        )
+        for p in es.properties
+    ]
+    # Use ontology_key_primary (logical names) if available; fall back to
+    # key_columns (physical) for legacy resolve_from_graph_spec() bridges
+    # where logical names were not preserved.
+    ont_key_names = (
+        list(es.ontology_key_primary)
+        if es.ontology_key_primary is not None
+        else list(es.key_columns)
+    )
+    ont_entities.append(
+        Entity(
+            name=es.name,
+            extends=es.extends,
+            keys=Keys(primary=ont_key_names),
+            properties=ont_props,
+            description=es.description or None,
+        )
+    )
+
+    bnd_props = [
+        PropertyBinding(name=p.logical_name, column=p.column)
+        for p in es.properties
+    ]
+    source = es.source
+    if source.startswith(target_prefix):
+      source = source[len(target_prefix) :]
+
+    bnd_entities.append(
+        EntityBinding(
+            name=es.name,
+            source=source,
+            properties=bnd_props,
+        )
+    )
+
+  # -- Relationships ---------------------------------------------------
+  ont_relationships: list[Relationship] = []
+  bnd_relationships: list[RelationshipBinding] = []
+  lineage_config: dict[str, LineageEdgeConfig] = {}
+
+  for rs in spec.relationships:
+    ont_props = [
+        Property(
+            name=p.logical_name,
+            type=_sdk_type_to_property_type(p.sdk_type),
+            description=p.description or None,
+        )
+        for p in rs.properties
+    ]
+
+    # Reconstruct ontology-level keys from carried metadata.
+    rel_keys = None
+    if rs.ontology_key_primary is not None:
+      rel_keys = Keys(primary=list(rs.ontology_key_primary))
+    elif rs.ontology_key_additional is not None:
+      rel_keys = Keys(additional=list(rs.ontology_key_additional))
+
+    ont_relationships.append(
+        Relationship(
+            name=rs.name,
+            **{'from': rs.from_entity},
+            to=rs.to_entity,
+            keys=rel_keys,
+            properties=ont_props,
+            description=rs.description or None,
+        )
+    )
+
+    bnd_props = [
+        PropertyBinding(name=p.logical_name, column=p.column)
+        for p in rs.properties
+    ]
+    source = rs.source
+    if source.startswith(target_prefix):
+      source = source[len(target_prefix) :]
+
+    bnd_relationships.append(
+        RelationshipBinding(
+            name=rs.name,
+            source=source,
+            from_columns=list(rs.from_columns or []),
+            to_columns=list(rs.to_columns or []),
+            properties=bnd_props,
+        )
+    )
+
+    if rs.from_session_column and rs.to_session_column:
+      lineage_config[rs.name] = LineageEdgeConfig(
+          from_session_column=rs.from_session_column,
+          to_session_column=rs.to_session_column,
+      )
+
+  # -- Assemble --------------------------------------------------------
+  ontology = Ontology(
+      ontology=ontology_name,
+      entities=ont_entities,
+      relationships=ont_relationships,
+  )
+
+  binding_obj = Binding(
+      binding=binding_name,
+      ontology=ontology_name,
+      target=BigQueryTarget(
+          backend=Backend.BIGQUERY,
+          project=project_id,
+          dataset=dataset_id,
+      ),
+      entities=bnd_entities,
+      relationships=bnd_relationships,
+  )
+
+  return ontology, binding_obj, lineage_config

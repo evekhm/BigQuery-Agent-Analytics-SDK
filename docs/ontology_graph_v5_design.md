@@ -1,5 +1,13 @@
 # Ontology Graph V5: TTL Import, Mixed Extraction, Temporal Lineage
 
+> **Migration note (issue #38):** This design doc is a historical record. The implementation
+> has migrated from `GraphSpec` to `ResolvedGraph`. Key API changes:
+> - `ttl_import()` / `ttl_resolve()` → `import_owl()` from `bigquery_ontology`
+> - `load_graph_spec()` → `load_ontology()` + `load_binding()` + `resolve()`
+> - `GraphSpec` / `EntitySpec` / `BindingSpec` → `ResolvedGraph` / `ResolvedEntity` / `ResolvedRelationship`
+>
+> The demo notebook has been updated to use the new API.
+
 Build production-scale context graphs from OWL ontologies, mixed telemetry
 sources, and cross-session entity evolution — all in BigQuery, driven by a
 single YAML spec.
@@ -96,6 +104,12 @@ GraphSpec YAML is tedious and error-prone.
 
 ### The solution: two-phase import
 
+> **Pre-migration API (historical).** The diagram and code below show the
+> original `ttl_import()` / `ttl_resolve()` / `load_graph_spec()` pipeline.
+> The current implementation uses `import_owl()` from `bigquery_ontology`,
+> `load_ontology_from_string()` + `load_binding_from_string()` + `resolve()`.
+> See the V5 demo notebook for working examples.
+
 ```
 OWL/TTL file  ──► ttl_import()  ──► *.import.yaml (unresolved)
                                     + ImportReport
@@ -113,6 +127,8 @@ emits an unresolved artifact with `FILL_IN` placeholders for ambiguities
 and produces runtime-ready YAML.
 
 ### Usage
+
+> **Pre-migration API (historical).** See migration note at top of document.
 
 ```python
 from bigquery_agent_analytics import ttl_import, ttl_resolve

@@ -1,0 +1,36 @@
+# Combined graph-spec YAML equivalent to test_ontology.yaml + test_binding.yaml.
+# Property names are physical column names (already resolved).
+# Used by bridge hardening tests to compare against the separated path.
+graph:
+  name: shop
+  entities:
+    - name: Customer
+      binding:
+        source: test-proj.test_ds.customers
+      keys:
+        primary: [cust_id]
+      properties:
+        - name: cust_id
+          type: string
+        - name: name
+          type: string
+      labels: [Customer]
+    - name: Order
+      binding:
+        source: test-proj.test_ds.orders
+      keys:
+        primary: [order_id]
+      properties:
+        - name: order_id
+          type: string
+        - name: total_usd
+          type: double
+      labels: [Order]
+  relationships:
+    - name: Placed
+      from_entity: Customer
+      to_entity: Order
+      binding:
+        source: test-proj.test_ds.placed_edges
+        from_columns: [cust_id]
+        to_columns: [order_id]

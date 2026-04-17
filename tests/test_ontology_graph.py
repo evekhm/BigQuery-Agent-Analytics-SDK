@@ -26,12 +26,10 @@ from bigquery_agent_analytics.ontology_graph import _build_edge_node_ref
 from bigquery_agent_analytics.ontology_graph import _build_node_id
 from bigquery_agent_analytics.ontology_graph import _hydrate_graph
 from bigquery_agent_analytics.ontology_graph import OntologyGraphManager
-from bigquery_agent_analytics.ontology_models import BindingSpec
-from bigquery_agent_analytics.ontology_models import EntitySpec
-from bigquery_agent_analytics.ontology_models import GraphSpec
-from bigquery_agent_analytics.ontology_models import KeySpec
-from bigquery_agent_analytics.ontology_models import PropertySpec
-from bigquery_agent_analytics.ontology_models import RelationshipSpec
+from bigquery_agent_analytics.resolved_spec import ResolvedEntity
+from bigquery_agent_analytics.resolved_spec import ResolvedGraph
+from bigquery_agent_analytics.resolved_spec import ResolvedProperty
+from bigquery_agent_analytics.resolved_spec import ResolvedRelationship
 
 # ------------------------------------------------------------------ #
 # Helpers                                                              #
@@ -39,14 +37,16 @@ from bigquery_agent_analytics.ontology_models import RelationshipSpec
 
 
 def _make_entity(name, props=None, keys=None):
-  props = props or [PropertySpec(name="eid", type="string")]
-  keys = keys or ["eid"]
-  return EntitySpec(
+  props = props or (
+      ResolvedProperty(column="eid", logical_name="eid", sdk_type="string"),
+  )
+  keys = keys or ("eid",)
+  return ResolvedEntity(
       name=name,
-      binding=BindingSpec(source="p.d.t"),
-      keys=KeySpec(primary=keys),
+      source="p.d.t",
+      key_columns=keys,
       properties=props,
-      labels=[name],
+      labels=(name,),
   )
 
 
@@ -54,35 +54,45 @@ def _simple_spec():
   """Two entities, one relationship."""
   a = _make_entity(
       "Alpha",
-      props=[
-          PropertySpec(name="alpha_id", type="string"),
-          PropertySpec(name="score", type="double"),
-      ],
-      keys=["alpha_id"],
+      props=(
+          ResolvedProperty(
+              column="alpha_id", logical_name="alpha_id", sdk_type="string"
+          ),
+          ResolvedProperty(
+              column="score", logical_name="score", sdk_type="double"
+          ),
+      ),
+      keys=("alpha_id",),
   )
   b = _make_entity(
       "Beta",
-      props=[
-          PropertySpec(name="beta_id", type="string"),
-          PropertySpec(name="active", type="bool"),
-      ],
-      keys=["beta_id"],
+      props=(
+          ResolvedProperty(
+              column="beta_id", logical_name="beta_id", sdk_type="string"
+          ),
+          ResolvedProperty(
+              column="active", logical_name="active", sdk_type="bool"
+          ),
+      ),
+      keys=("beta_id",),
   )
-  rel = RelationshipSpec(
+  rel = ResolvedRelationship(
       name="AlphaToBeta",
+      source="p.d.edges",
       from_entity="Alpha",
       to_entity="Beta",
-      binding=BindingSpec(
-          source="p.d.edges",
-          from_columns=["alpha_id"],
-          to_columns=["beta_id"],
+      from_columns=("alpha_id",),
+      to_columns=("beta_id",),
+      properties=(
+          ResolvedProperty(
+              column="weight", logical_name="weight", sdk_type="double"
+          ),
       ),
-      properties=[PropertySpec(name="weight", type="double")],
   )
-  return GraphSpec(
+  return ResolvedGraph(
       name="test_graph",
-      entities=[a, b],
-      relationships=[rel],
+      entities=(a, b),
+      relationships=(rel,),
   )
 
 
@@ -316,12 +326,14 @@ class TestBuildNodeId:
   def test_composite_keys_sorted(self):
     entity = _make_entity(
         "Multi",
-        props=[
-            PropertySpec(name="k1", type="string"),
-            PropertySpec(name="k2", type="int64"),
-            PropertySpec(name="val", type="double"),
-        ],
-        keys=["k1", "k2"],
+        props=(
+            ResolvedProperty(column="k1", logical_name="k1", sdk_type="string"),
+            ResolvedProperty(column="k2", logical_name="k2", sdk_type="int64"),
+            ResolvedProperty(
+                column="val", logical_name="val", sdk_type="double"
+            ),
+        ),
+        keys=("k1", "k2"),
     )
     raw_node = {"entity_name": "Multi", "k2": 42, "k1": "abc", "val": 1.0}
     node_id = _build_node_id(raw_node, "Multi", entity, "sess1", 0)
@@ -343,11 +355,11 @@ class TestBuildNodeId:
     """If only some composite key columns present, fall back to index."""
     entity = _make_entity(
         "Multi",
-        props=[
-            PropertySpec(name="k1", type="string"),
-            PropertySpec(name="k2", type="int64"),
-        ],
-        keys=["k1", "k2"],
+        props=(
+            ResolvedProperty(column="k1", logical_name="k1", sdk_type="string"),
+            ResolvedProperty(column="k2", logical_name="k2", sdk_type="int64"),
+        ),
+        keys=("k1", "k2"),
     )
     raw_node = {"entity_name": "Multi", "k1": "abc"}  # k2 missing
     node_id = _build_node_id(raw_node, "Multi", entity, "sess1", 7)
@@ -650,9 +662,51 @@ class TestHydrateGraph:
 
   def test_labels_from_spec_entity(self):
     """Labels are resolved from the spec's entity definition."""
-    spec = _simple_spec()
-    # Manually set multi-labels to simulate extends.
-    spec.entities[0].labels = ["Alpha", "BaseEntity"]
+    # Build a spec with multi-labels to simulate extends.
+    alpha = ResolvedEntity(
+        name="Alpha",
+        source="p.d.t",
+        key_columns=("alpha_id",),
+        properties=(
+            ResolvedProperty(
+                column="alpha_id", logical_name="alpha_id", sdk_type="string"
+            ),
+            ResolvedProperty(
+                column="score", logical_name="score", sdk_type="double"
+            ),
+        ),
+        labels=("Alpha", "BaseEntity"),
+    )
+    beta = _make_entity(
+        "Beta",
+        props=(
+            ResolvedProperty(
+                column="beta_id", logical_name="beta_id", sdk_type="string"
+            ),
+            ResolvedProperty(
+                column="active", logical_name="active", sdk_type="bool"
+            ),
+        ),
+        keys=("beta_id",),
+    )
+    rel = ResolvedRelationship(
+        name="AlphaToBeta",
+        source="p.d.edges",
+        from_entity="Alpha",
+        to_entity="Beta",
+        from_columns=("alpha_id",),
+        to_columns=("beta_id",),
+        properties=(
+            ResolvedProperty(
+                column="weight", logical_name="weight", sdk_type="double"
+            ),
+        ),
+    )
+    spec = ResolvedGraph(
+        name="test_graph",
+        entities=(alpha, beta),
+        relationships=(rel,),
+    )
     rows = [
         {
             "session_id": "sess1",
@@ -715,24 +769,25 @@ class TestHydrateGraph:
     """Edge refs resolve to nodes even with composite primary keys."""
     entity = _make_entity(
         "Multi",
-        props=[
-            PropertySpec(name="k1", type="string"),
-            PropertySpec(name="k2", type="int64"),
-        ],
-        keys=["k1", "k2"],
+        props=(
+            ResolvedProperty(column="k1", logical_name="k1", sdk_type="string"),
+            ResolvedProperty(column="k2", logical_name="k2", sdk_type="int64"),
+        ),
+        keys=("k1", "k2"),
     )
     other = _make_entity("Other")
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="R",
+        source="p.d.edges",
         from_entity="Multi",
         to_entity="Other",
-        binding=BindingSpec(
-            source="p.d.edges",
-            from_columns=["k1", "k2"],
-            to_columns=["eid"],
-        ),
+        from_columns=("k1", "k2"),
+        to_columns=("eid",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[entity, other], relationships=[rel])
+    spec = ResolvedGraph(
+        name="g", entities=(entity, other), relationships=(rel,)
+    )
 
     rows = [
         {

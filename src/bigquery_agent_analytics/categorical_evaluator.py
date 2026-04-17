@@ -66,6 +66,8 @@ from typing import Any, Optional
 from pydantic import BaseModel
 from pydantic import Field
 
+from bigquery_agent_analytics.evaluators import strip_markdown_fences
+
 logger = logging.getLogger("bigquery_agent_analytics." + __name__)
 
 DEFAULT_ENDPOINT = "gemini-2.5-flash"
@@ -665,8 +667,12 @@ def parse_classifications(
         for m in config.metrics
     ]
 
+  # Strip markdown code blocks (```json ... ```) that models often wrap
+  # around JSON output. Uses the shared helper from evaluators.py.
+  text = strip_markdown_fences(raw_json)
+
   try:
-    parsed = json.loads(raw_json)
+    parsed = json.loads(text)
   except (json.JSONDecodeError, TypeError):
     return [
         CategoricalMetricResult(

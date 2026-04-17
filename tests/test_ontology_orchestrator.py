@@ -22,24 +22,23 @@ from unittest.mock import patch
 
 import pytest
 
-from bigquery_agent_analytics.ontology_models import BindingSpec
-from bigquery_agent_analytics.ontology_models import EntitySpec
-from bigquery_agent_analytics.ontology_models import ExtractedEdge
-from bigquery_agent_analytics.ontology_models import ExtractedGraph
-from bigquery_agent_analytics.ontology_models import ExtractedNode
-from bigquery_agent_analytics.ontology_models import ExtractedProperty
-from bigquery_agent_analytics.ontology_models import GraphSpec
-from bigquery_agent_analytics.ontology_models import KeySpec
-from bigquery_agent_analytics.ontology_models import load_graph_spec
-from bigquery_agent_analytics.ontology_models import PropertySpec
-from bigquery_agent_analytics.ontology_models import RelationshipSpec
+from bigquery_agent_analytics.extracted_models import ExtractedEdge
+from bigquery_agent_analytics.extracted_models import ExtractedGraph
+from bigquery_agent_analytics.extracted_models import ExtractedNode
+from bigquery_agent_analytics.extracted_models import ExtractedProperty
 from bigquery_agent_analytics.ontology_orchestrator import _short_alias
 from bigquery_agent_analytics.ontology_orchestrator import build_ontology_graph
 from bigquery_agent_analytics.ontology_orchestrator import compile_showcase_gql
+from bigquery_agent_analytics.resolved_spec import load_resolved_graph
+from bigquery_agent_analytics.resolved_spec import ResolvedEntity
+from bigquery_agent_analytics.resolved_spec import ResolvedGraph
+from bigquery_agent_analytics.resolved_spec import ResolvedProperty
+from bigquery_agent_analytics.resolved_spec import ResolvedRelationship
 
 # ------------------------------------------------------------------ #
 # Helpers                                                              #
 # ------------------------------------------------------------------ #
+
 
 _DEMO_SPEC_PATH = os.path.join(
     os.path.dirname(__file__),
@@ -59,13 +58,15 @@ _ALL_YMGO_TABLES = {
 
 
 def _make_entity(name, props=None, keys=None, source="p.d.t", labels=None):
-  props = props or [PropertySpec(name="eid", type="string")]
-  keys = keys or ["eid"]
-  labels = labels or [name]
-  return EntitySpec(
+  props = props or (
+      ResolvedProperty(column="eid", logical_name="eid", sdk_type="string"),
+  )
+  keys = keys or ("eid",)
+  labels = labels or (name,)
+  return ResolvedEntity(
       name=name,
-      binding=BindingSpec(source=source),
-      keys=KeySpec(primary=keys),
+      source=source,
+      key_columns=keys,
       properties=props,
       labels=labels,
   )
@@ -74,37 +75,47 @@ def _make_entity(name, props=None, keys=None, source="p.d.t", labels=None):
 def _simple_spec():
   a = _make_entity(
       "Alpha",
-      props=[
-          PropertySpec(name="alpha_id", type="string"),
-          PropertySpec(name="score", type="double"),
-      ],
-      keys=["alpha_id"],
+      props=(
+          ResolvedProperty(
+              column="alpha_id", logical_name="alpha_id", sdk_type="string"
+          ),
+          ResolvedProperty(
+              column="score", logical_name="score", sdk_type="double"
+          ),
+      ),
+      keys=("alpha_id",),
       source="p.d.alpha_table",
   )
   b = _make_entity(
       "Beta",
-      props=[
-          PropertySpec(name="beta_id", type="string"),
-          PropertySpec(name="active", type="bool"),
-      ],
-      keys=["beta_id"],
+      props=(
+          ResolvedProperty(
+              column="beta_id", logical_name="beta_id", sdk_type="string"
+          ),
+          ResolvedProperty(
+              column="active", logical_name="active", sdk_type="bool"
+          ),
+      ),
+      keys=("beta_id",),
       source="p.d.beta_table",
   )
-  rel = RelationshipSpec(
+  rel = ResolvedRelationship(
       name="AlphaToBeta",
+      source="p.d.alpha_beta_edges",
       from_entity="Alpha",
       to_entity="Beta",
-      binding=BindingSpec(
-          source="p.d.alpha_beta_edges",
-          from_columns=["alpha_id"],
-          to_columns=["beta_id"],
+      from_columns=("alpha_id",),
+      to_columns=("beta_id",),
+      properties=(
+          ResolvedProperty(
+              column="weight", logical_name="weight", sdk_type="double"
+          ),
       ),
-      properties=[PropertySpec(name="weight", type="double")],
   )
-  return GraphSpec(
+  return ResolvedGraph(
       name="test_graph",
-      entities=[a, b],
-      relationships=[rel],
+      entities=(a, b),
+      relationships=(rel,),
   )
 
 
@@ -181,10 +192,10 @@ class TestCompileShowcaseGql:
       )
 
   def test_no_relationships_raises(self):
-    spec = GraphSpec(
+    spec = ResolvedGraph(
         name="no_rels",
-        entities=[_make_entity("A")],
-        relationships=[],
+        entities=(_make_entity("A"),),
+        relationships=(),
     )
     with pytest.raises(ValueError, match="no relationships"):
       compile_showcase_gql(spec, "proj", "ds")
@@ -202,7 +213,7 @@ class TestCompileShowcaseGql:
 
   def test_demo_yaml_gql(self):
     """The real YMGO spec produces valid GQL structure."""
-    spec = load_graph_spec(_DEMO_SPEC_PATH, env="p.d")
+    spec = load_resolved_graph(_DEMO_SPEC_PATH, env="p.d")
     gql = compile_showcase_gql(spec, "proj", "ds")
     assert "GRAPH `proj.ds.YMGO_Context_Graph_V3`" in gql
     assert ":mako_DecisionPoint" in gql
@@ -210,7 +221,7 @@ class TestCompileShowcaseGql:
     assert ":sup_YahooAdUnit" in gql
 
   def test_demo_yaml_second_relationship(self):
-    spec = load_graph_spec(_DEMO_SPEC_PATH, env="p.d")
+    spec = load_resolved_graph(_DEMO_SPEC_PATH, env="p.d")
     gql = compile_showcase_gql(
         spec, "proj", "ds", relationship_name="ForCandidate"
     )
@@ -222,28 +233,35 @@ class TestCompileShowcaseGql:
     """Two entities with same alias prefix get disambiguated."""
     a = _make_entity(
         "SameAlias",
-        props=[PropertySpec(name="a_id", type="string")],
-        keys=["a_id"],
+        props=(
+            ResolvedProperty(
+                column="a_id", logical_name="a_id", sdk_type="string"
+            ),
+        ),
+        keys=("a_id",),
         source="p.d.a",
     )
     b = _make_entity(
         "SameAlias2",
-        props=[PropertySpec(name="b_id", type="string")],
-        keys=["b_id"],
+        props=(
+            ResolvedProperty(
+                column="b_id", logical_name="b_id", sdk_type="string"
+            ),
+        ),
+        keys=("b_id",),
         source="p.d.b",
-        labels=["SameAlias2"],
+        labels=("SameAlias2",),
     )
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="R",
+        source="p.d.edges",
         from_entity="SameAlias",
         to_entity="SameAlias2",
-        binding=BindingSpec(
-            source="p.d.edges",
-            from_columns=["a_id"],
-            to_columns=["b_id"],
-        ),
+        from_columns=("a_id",),
+        to_columns=("b_id",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[a, b], relationships=[rel])
+    spec = ResolvedGraph(name="g", entities=(a, b), relationships=(rel,))
     # Should not raise — aliases are disambiguated.
     gql = compile_showcase_gql(spec, "proj", "ds")
     assert "MATCH" in gql
@@ -255,27 +273,34 @@ class TestCompileShowcaseGql:
     # So src_alias="ea" and edge_alias="ea" would collide without the fix.
     a = _make_entity(
         "EA",
-        props=[PropertySpec(name="a_id", type="string")],
-        keys=["a_id"],
+        props=(
+            ResolvedProperty(
+                column="a_id", logical_name="a_id", sdk_type="string"
+            ),
+        ),
+        keys=("a_id",),
         source="p.d.a",
     )
     b = _make_entity(
         "Beta",
-        props=[PropertySpec(name="b_id", type="string")],
-        keys=["b_id"],
+        props=(
+            ResolvedProperty(
+                column="b_id", logical_name="b_id", sdk_type="string"
+            ),
+        ),
+        keys=("b_id",),
         source="p.d.b",
     )
-    rel = RelationshipSpec(
+    rel = ResolvedRelationship(
         name="Alpha",
+        source="p.d.edges",
         from_entity="EA",
         to_entity="Beta",
-        binding=BindingSpec(
-            source="p.d.edges",
-            from_columns=["a_id"],
-            to_columns=["b_id"],
-        ),
+        from_columns=("a_id",),
+        to_columns=("b_id",),
+        properties=(),
     )
-    spec = GraphSpec(name="g", entities=[a, b], relationships=[rel])
+    spec = ResolvedGraph(name="g", entities=(a, b), relationships=(rel,))
     gql = compile_showcase_gql(spec, "proj", "ds")
     # Extract aliases from the MATCH clause.
     import re

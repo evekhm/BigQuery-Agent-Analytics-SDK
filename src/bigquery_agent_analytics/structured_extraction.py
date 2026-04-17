@@ -35,12 +35,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field
-from typing import Callable
+from typing import Any, Callable
 
-from bigquery_agent_analytics.ontology_models import ExtractedEdge
-from bigquery_agent_analytics.ontology_models import ExtractedNode
-from bigquery_agent_analytics.ontology_models import ExtractedProperty
-from bigquery_agent_analytics.ontology_models import GraphSpec
+from bigquery_agent_analytics.extracted_models import ExtractedEdge
+from bigquery_agent_analytics.extracted_models import ExtractedNode
+from bigquery_agent_analytics.extracted_models import ExtractedProperty
 
 # ------------------------------------------------------------------ #
 # Data contracts                                                       #
@@ -69,7 +68,7 @@ class StructuredExtractionResult:
 
 
 # Type alias for extractor callables.
-StructuredExtractor = Callable[[dict, GraphSpec], StructuredExtractionResult]
+StructuredExtractor = Callable[[dict, Any], StructuredExtractionResult]
 
 
 # ------------------------------------------------------------------ #
@@ -120,7 +119,7 @@ def merge_extraction_results(
 
 def extract_bka_decision_event(
     event: dict,
-    spec: GraphSpec,
+    spec: Any,
 ) -> StructuredExtractionResult:
   """Extract a ``mako_DecisionPoint`` node from a BKA decision event.
 
@@ -138,7 +137,7 @@ def extract_bka_decision_event(
     event: Raw telemetry event dict.  Expected keys: ``span_id``,
         ``session_id``, ``content`` (a nested dict with at least
         ``decision_id``).
-    spec: The active ``GraphSpec`` (unused by this extractor but
+    spec: The active graph spec (unused by this extractor but
         required by the ``StructuredExtractor`` signature).
 
   Returns:
@@ -199,7 +198,7 @@ def extract_bka_decision_event(
 def run_structured_extractors(
     events: list[dict],
     extractors: dict[str, StructuredExtractor],
-    spec: GraphSpec,
+    spec: Any,
 ) -> StructuredExtractionResult:
   """Run registered extractors against a list of telemetry events.
 
@@ -211,7 +210,7 @@ def run_structured_extractors(
     events: Raw telemetry event dicts.  Each must have an
         ``event_type`` key to match against the extractor registry.
     extractors: Mapping of ``event_type`` string to extractor callable.
-    spec: The active ``GraphSpec`` forwarded to each extractor.
+    spec: The active graph spec forwarded to each extractor.
 
   Returns:
     A single merged ``StructuredExtractionResult``.
