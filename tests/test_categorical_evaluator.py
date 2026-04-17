@@ -1902,3 +1902,61 @@ class TestRetryFailedSessions:
     assert len(results) == 2
     assert retry_meta["failed_count"] == 1
     assert retry_meta["retry_attempted"] is True
+
+
+# ------------------------------------------------------------------ #
+# ORDER BY before LIMIT — regression tests (#55)                       #
+# ------------------------------------------------------------------ #
+
+
+class TestQueryOrderByBeforeLimit:
+  """Ensure all session-fetching query templates have ORDER BY before LIMIT."""
+
+  def test_transcript_query_orders_before_limit(self):
+    sql = CATEGORICAL_TRANSCRIPT_QUERY
+    order_pos = sql.index("ORDER BY MAX(timestamp)")
+    limit_pos = sql.index("LIMIT @trace_limit")
+    assert order_pos < limit_pos
+
+  def test_ai_generate_query_orders_before_limit(self):
+    sql = CATEGORICAL_AI_GENERATE_QUERY
+    order_pos = sql.index("ORDER BY MAX(timestamp)")
+    limit_pos = sql.index("LIMIT @trace_limit")
+    assert order_pos < limit_pos
+
+  def test_ai_classify_query_orders_before_limit(self):
+    config = _make_config()
+    sql = build_ai_classify_query(config, "proj", "ds", "tbl", "1=1")
+    order_pos = sql.index("ORDER BY MAX(timestamp)")
+    limit_pos = sql.index("LIMIT @trace_limit")
+    assert order_pos < limit_pos
+
+  def test_ai_generate_dynamic_query_orders_before_limit(self):
+    sql = build_ai_generate_query(
+        "proj", "ds", "tbl", "1=1", "gemini-2.5-flash", 0.0
+    )
+    order_pos = sql.index("ORDER BY MAX(timestamp)")
+    limit_pos = sql.index("LIMIT @trace_limit")
+    assert order_pos < limit_pos
+
+  def test_all_queries_have_session_id_tiebreaker(self):
+    """ORDER BY should include session_id for full determinism."""
+    config = _make_config()
+    queries = [
+        ("CATEGORICAL_TRANSCRIPT_QUERY", CATEGORICAL_TRANSCRIPT_QUERY),
+        ("CATEGORICAL_AI_GENERATE_QUERY", CATEGORICAL_AI_GENERATE_QUERY),
+        (
+            "build_ai_classify_query",
+            build_ai_classify_query(config, "p", "d", "t", "1=1"),
+        ),
+        (
+            "build_ai_generate_query",
+            build_ai_generate_query(
+                "p", "d", "t", "1=1", "gemini-2.5-flash", 0.0
+            ),
+        ),
+    ]
+    for name, sql in queries:
+      assert (
+          "ORDER BY MAX(timestamp) DESC, session_id" in sql
+      ), f"{name} missing session_id tiebreaker in ORDER BY"
