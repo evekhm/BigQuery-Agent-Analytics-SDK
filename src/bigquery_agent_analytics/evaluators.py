@@ -39,6 +39,7 @@ from datetime import datetime
 from datetime import timezone
 import json
 import logging
+import re
 from typing import Any, Callable, Optional
 
 from pydantic import BaseModel
@@ -818,7 +819,7 @@ LLM_JUDGE_BATCH_QUERY = _LEGACY_LLM_JUDGE_BATCH_QUERY
 # ------------------------------------------------------------------ #
 
 
-def _strip_markdown_fences(text: str) -> str:
+def strip_markdown_fences(text: Optional[str]) -> Optional[str]:
   """Strip markdown code block fences (``\\`\\`\\`json ... \\`\\`\\```) if present.
 
   Models frequently wrap JSON output in fenced code blocks. This helper
@@ -833,11 +834,13 @@ def _strip_markdown_fences(text: str) -> str:
   text = text.strip()
   if not text.startswith("```"):
     return text
-  import re
-
-  text = re.sub(r"^```(?:json|sql)?\s*\n?", "", text)
+  text = re.sub(r"^```[a-zA-Z]*\s*\n?", "", text)
   text = re.sub(r"\n?\s*```\s*$", "", text)
   return text.strip()
+
+
+# Backwards-compatible alias
+_strip_markdown_fences = strip_markdown_fences
 
 
 def _parse_json_from_text(text: str) -> Optional[dict[str, Any]]:
@@ -846,7 +849,7 @@ def _parse_json_from_text(text: str) -> Optional[dict[str, Any]]:
     return None
 
   # Strip markdown fences first
-  stripped = _strip_markdown_fences(text)
+  stripped = strip_markdown_fences(text)
   try:
     return json.loads(stripped)
   except (json.JSONDecodeError, TypeError):

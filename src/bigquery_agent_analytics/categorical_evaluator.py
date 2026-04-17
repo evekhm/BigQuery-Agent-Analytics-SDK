@@ -66,7 +66,7 @@ from typing import Any, Optional
 from pydantic import BaseModel
 from pydantic import Field
 
-from bigquery_agent_analytics.evaluators import _strip_markdown_fences
+from bigquery_agent_analytics.evaluators import strip_markdown_fences
 
 logger = logging.getLogger("bigquery_agent_analytics." + __name__)
 
@@ -662,7 +662,7 @@ def parse_classifications(
 
   # Strip markdown code blocks (```json ... ```) that models often wrap
   # around JSON output. Uses the shared helper from evaluators.py.
-  text = _strip_markdown_fences(raw_json)
+  text = strip_markdown_fences(raw_json)
 
   try:
     parsed = json.loads(text)
