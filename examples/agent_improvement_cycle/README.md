@@ -125,8 +125,20 @@ Agent sessions  -->  BigQuery  -->  SDK quality evaluation  -->  improve_agent.p
 ### Prerequisites
 
 - Python 3.10+
-- Google Cloud project with BigQuery enabled
+- Google Cloud project with billing enabled
 - `gcloud` CLI authenticated (`gcloud auth application-default login`)
+
+The setup script enables the required APIs automatically:
+- **BigQuery API** (`bigquery.googleapis.com`)
+- **Vertex AI API** (`aiplatform.googleapis.com`)
+
+Your authenticated user or service account needs these IAM roles:
+
+| Role | Why |
+|------|-----|
+| `roles/bigquery.dataEditor` | Create datasets, write agent session data |
+| `roles/bigquery.jobUser` | Run BigQuery queries for evaluation |
+| `roles/aiplatform.user` | Call Gemini models (agent + evaluator + improver) |
 
 ### 1. Configure environment
 

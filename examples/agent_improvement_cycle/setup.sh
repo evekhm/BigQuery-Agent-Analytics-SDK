@@ -16,10 +16,16 @@
 # Setup script for the Agent Improvement Cycle demo.
 #
 # This script:
-#   1. Checks prerequisites (Python, gcloud auth, BigQuery dataset)
-#   2. Installs Python dependencies
-#   3. Creates the BigQuery dataset if needed
-#   4. Writes a .env file with project configuration
+#   1. Checks prerequisites (Python, gcloud auth)
+#   2. Enables required Google Cloud APIs
+#   3. Installs Python dependencies
+#   4. Creates the BigQuery dataset if needed
+#   5. Writes a .env file with project configuration
+#
+# Required IAM roles for the authenticated user/service account:
+#   - roles/bigquery.dataEditor    (create datasets, write session data)
+#   - roles/bigquery.jobUser       (run BigQuery jobs)
+#   - roles/aiplatform.user        (call Vertex AI / Gemini models)
 
 set -euo pipefail
 
@@ -34,7 +40,7 @@ echo "============================================"
 echo ""
 
 # 1. Check Python
-echo "[1/4] Checking Python..."
+echo "[1/5] Checking Python..."
 if ! command -v python3 &>/dev/null; then
   echo "ERROR: python3 is required but not found." >&2
   exit 1
@@ -44,7 +50,7 @@ echo "  $PYTHON_VERSION"
 
 # 2. Check gcloud auth
 echo ""
-echo "[2/4] Checking Google Cloud authentication..."
+echo "[2/5] Checking Google Cloud authentication..."
 if ! command -v gcloud &>/dev/null; then
   echo "ERROR: gcloud CLI is required. Install: https://cloud.google.com/sdk/docs/install" >&2
   exit 1
@@ -64,17 +70,25 @@ if ! gcloud auth application-default print-access-token &>/dev/null 2>&1; then
 fi
 echo "  Credentials: OK"
 
-# 3. Install dependencies
+# 3. Enable required APIs
 echo ""
-echo "[3/4] Installing Python dependencies..."
+echo "[3/5] Enabling required Google Cloud APIs..."
+gcloud services enable bigquery.googleapis.com --project="$PROJECT_ID" 2>/dev/null
+echo "  BigQuery API: enabled"
+gcloud services enable aiplatform.googleapis.com --project="$PROJECT_ID" 2>/dev/null
+echo "  Vertex AI API: enabled"
+
+# 4. Install dependencies
+echo ""
+echo "[4/5] Installing Python dependencies..."
 cd "$REPO_ROOT"
 pip install -e ".[all]" --quiet 2>&1 | tail -1 || pip install -e ".[all]"
 pip install python-dotenv --quiet 2>&1 | tail -1 || pip install python-dotenv
 echo "  Dependencies installed."
 
-# 4. Configure environment
+# 5. Configure environment
 echo ""
-echo "[4/4] Configuring environment..."
+echo "[5/5] Configuring environment..."
 
 DATASET_ID="${DATASET_ID:-agent_logs}"
 BQ_LOCATION="${BQ_LOCATION:-us-central1}"
