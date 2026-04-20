@@ -200,7 +200,7 @@ All other variables have sensible defaults. Only set them if you need different 
 ```bash
 # BigQuery dataset for session logs (defaults shown)
 DATASET_ID=agent_logs
-BQ_LOCATION=us-central1
+DATASET_LOCATION=us-central1
 TABLE_ID=agent_events
 
 # Agent model (defaults shown)
@@ -270,7 +270,7 @@ git checkout -- agent/prompts.py eval/eval_cases.json
 |----------|---------|-------------|
 | `PROJECT_ID` | from `gcloud` | Google Cloud project ID (required) |
 | `DATASET_ID` | `agent_logs` | BigQuery dataset for session logs |
-| `BQ_LOCATION` | `us-central1` | BigQuery dataset location |
+| `DATASET_LOCATION` | `us-central1` | BigQuery dataset location |
 | `TABLE_ID` | `agent_events` | BigQuery table name |
 | `DEMO_MODEL_ID` | `gemini-2.5-flash` | Model for the demo agent |
 | `DEMO_AGENT_LOCATION` | `us-central1` | Vertex AI location |

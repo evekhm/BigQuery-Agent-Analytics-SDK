@@ -38,10 +38,11 @@ _env_path = os.path.join(os.path.dirname(__file__), "../.env")
 if os.path.exists(_env_path):
   load_dotenv(dotenv_path=_env_path)
 
-_, project_id = google.auth.default()
+_, _auth_project = google.auth.default()
+project_id = os.getenv("PROJECT_ID") or _auth_project
 
 DATASET_ID = os.getenv("DATASET_ID", "agent_logs")
-DATASET_LOCATION = os.getenv("BQ_LOCATION", "us-central1")
+DATASET_LOCATION = os.getenv("DATASET_LOCATION", "us-central1")
 TABLE_ID = os.getenv("TABLE_ID", "agent_events")
 MODEL_ID = os.getenv("DEMO_MODEL_ID", "gemini-2.5-flash")
 LOCATION = os.getenv("DEMO_AGENT_LOCATION", "us-central1")

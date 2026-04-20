@@ -42,7 +42,8 @@ _env_path = os.path.join(_DEMO_DIR, ".env")
 if os.path.exists(_env_path):
   load_dotenv(dotenv_path=_env_path)
 
-_, _project_id = google.auth.default()
+_, _auth_project = google.auth.default()
+_project_id = os.getenv("PROJECT_ID") or _auth_project
 _location = os.getenv("DEMO_AGENT_LOCATION", "us-central1")
 os.environ["GOOGLE_CLOUD_PROJECT"] = _project_id
 os.environ["GOOGLE_CLOUD_LOCATION"] = _location
