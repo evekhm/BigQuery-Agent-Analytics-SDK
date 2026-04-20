@@ -130,17 +130,33 @@ for cycle in $(seq 1 "$CYCLES"); do
   # -----------------------------------------------------------------------
   # STEP 1: Simulate user traffic
   #
-  # Sends each question from eval_cases.json to the agent. The agent
-  # processes them as real requests (calling tools, generating responses).
-  # Every session is automatically logged to BigQuery via the
-  # BigQueryAgentAnalyticsPlugin attached to the agent.
+  # How it works:
+  #   1. run_eval.py loads the agent defined in agent/agent.py
+  #   2. It creates an ADK InMemoryRunner, which runs the agent locally
+  #      in-process (no server, no deployment, no network calls to the
+  #      agent itself). The agent DOES make real calls to Vertex AI
+  #      (Gemini) for LLM responses and executes its tools locally.
+  #   3. For each question in eval/eval_cases.json, it creates a new
+  #      ADK session and sends the question as a user message.
+  #   4. The BigQueryAgentAnalyticsPlugin (attached to the runner as a
+  #      plugin) automatically captures each session's full trace
+  #      (user question, tool calls, LLM responses) and writes it to
+  #      BigQuery. This happens transparently, no extra code needed.
   #
-  # In production, real users generate sessions naturally. Here we use
-  # eval cases as synthetic traffic so we have data to evaluate.
+  # The questions in eval_cases.json are hardcoded test cases. They
+  # simulate what real users would ask in production. The improver
+  # (Step 3) adds new questions each cycle based on what failed, so
+  # the test suite grows over time.
+  #
+  # No server is involved. The agent runs entirely in this Python
+  # process via ADK's InMemoryRunner. The only external calls are:
+  #   - Vertex AI (Gemini) for LLM inference
+  #   - BigQuery for session logging (via the plugin)
   # -----------------------------------------------------------------------
   echo ""
   echo "[Step 1/$TOTAL_STEPS] Simulating user traffic (eval_cases.json -> agent -> BigQuery)..."
-  echo "  Sending test questions to the agent. Each creates a session logged to BigQuery."
+  echo "  Running agent locally via ADK InMemoryRunner. Each question creates a session"
+  echo "  that is automatically logged to BigQuery via BigQueryAgentAnalyticsPlugin."
   python3 -W ignore::UserWarning "$SCRIPT_DIR/eval/run_eval.py"
 
   # -----------------------------------------------------------------------

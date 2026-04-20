@@ -96,21 +96,68 @@ The v1 prompt has intentional problems that cause ~70% of sessions to fail:
 The tools themselves have all the data. The flaw is that the prompt
 discourages the agent from using them.
 
-### The Fix Loop
+### Step 1: Run Eval Cases (run_eval.py)
 
-Each cycle:
+`run_eval.py` runs the agent **locally** using ADK's `InMemoryRunner`.
+No server, no deployment, no containers. The agent runs entirely
+in-process on your machine.
 
-1. **Eval** - `run_eval.py` sends questions to the agent. Sessions are
-   logged to BigQuery via the analytics plugin.
-2. **Analyze** - The SDK's `quality_report.py` reads logged sessions from
-   BigQuery, evaluates each one (was the response useful? was it grounded
-   in tool output?), and writes a structured JSON report. The `--app-name`
-   flag scopes evaluation to this agent only.
-3. **Improve** - `improve_agent.py` reads the quality report JSON, calls
-   Gemini to generate a fixed prompt addressing the specific failures, and
-   adds new eval cases targeting those failure modes.
-4. **Version** - The new prompt is appended to `prompts.py` as `PROMPT_VN`
-   and `CURRENT_PROMPT` is updated. The eval suite grows with each cycle.
+Here is what happens for each question in `eval/eval_cases.json`:
+
+1. `InMemoryRunner` creates a new ADK session for the agent
+2. The question is sent as a user message
+3. The agent processes it like a real request: it calls Gemini on
+   Vertex AI for reasoning, and executes its tools (`lookup_company_policy`,
+   `get_current_date`) locally
+4. `BigQueryAgentAnalyticsPlugin` (attached as a plugin to the runner)
+   automatically captures the full session trace and writes it to BigQuery.
+   This is the same plugin you would use in production. No extra logging
+   code is needed.
+
+The questions are hardcoded test cases that simulate real user traffic.
+In production, real users generate sessions naturally through your agent's
+serving endpoint. The plugin captures those sessions the same way.
+
+```python
+# From run_eval.py - this is how the agent runs locally:
+runner = InMemoryRunner(
+    agent=root_agent,
+    app_name="company_info_agent",
+    plugins=[bq_logging_plugin],   # <-- sessions auto-logged to BigQuery
+)
+# Send a question, get a response - just like a real user interaction
+async for event in runner.run_async(user_id, session_id, user_message):
+    ...
+```
+
+### Step 2: Evaluate Quality (quality_report.py)
+
+The SDK's `quality_report.py` reads the sessions just logged to BigQuery
+and scores each one:
+
+- **response_usefulness**: Was the answer meaningful, partial, or unhelpful?
+- **task_grounding**: Was it based on tool output, or did the agent hallucinate?
+
+The `--app-name` flag filters to sessions from this agent only (ignoring
+other agents sharing the same BigQuery dataset). `--output-json` produces
+a structured report that the improver consumes programmatically.
+
+### Step 3: Auto-Improve (improve_agent.py)
+
+`improve_agent.py` reads the quality report JSON and calls Gemini to fix
+the prompt:
+
+1. Reads the quality report (which sessions failed and why)
+2. Reads the current prompt from `agent/prompts.py`
+3. Sends both to Gemini, asking it to fix the identified issues
+4. Gemini returns a JSON with: an improved prompt, a summary of changes,
+   and new eval cases that test the fixes
+5. The script writes `PROMPT_V{N+1}` to `prompts.py` and updates
+   `CURRENT_PROMPT` to point to it
+6. New eval cases are appended to `eval/eval_cases.json`
+
+On the next cycle, the agent uses the improved prompt, and the new eval
+cases verify the fixes hold.
 
 ### Data Flow
 
