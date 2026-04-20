@@ -40,9 +40,9 @@ if os.path.exists(_env_path):
 
 _, project_id = google.auth.default()
 
-DATASET_ID = os.getenv("TEST_DATASET_ID", "agent_logs")
-DATASET_LOCATION = os.getenv("TEST_BQ_LOCATION", "us-central1")
-TABLE_ID = os.getenv("TEST_TABLE_ID", "agent_events")
+DATASET_ID = os.getenv("DATASET_ID", "agent_logs")
+DATASET_LOCATION = os.getenv("BQ_LOCATION", "us-central1")
+TABLE_ID = os.getenv("TABLE_ID", "agent_events")
 MODEL_ID = os.getenv("DEMO_MODEL_ID", "gemini-2.5-flash")
 LOCATION = os.getenv("DEMO_AGENT_LOCATION", "us-central1")
 

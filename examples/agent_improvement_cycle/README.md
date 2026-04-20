@@ -14,15 +14,22 @@ predicted.
 
 ## The Solution: Learn from the Field
 
-This demo shows how to close that gap:
+This demo shows how to close that gap using two SDK components:
+
+1. **`BigQueryAgentAnalyticsPlugin`** captures every real agent session
+   (questions, tool calls, responses) into BigQuery automatically.
+2. **`quality_report.py`** (the SDK's evaluation script) reads those
+   logged sessions back from BigQuery, evaluates quality, and produces
+   structured reports that can drive automated improvement.
+
+The full cycle:
 
 1. **Run** a Q&A agent that answers employee policy questions
-2. **Log** every session to BigQuery via the `BigQueryAgentAnalyticsPlugin`
-3. **Evaluate** logged sessions with LLM-as-a-judge quality metrics
-   (`response_usefulness`, `task_grounding`) using the SDK's `quality_report.py`
-4. **Improve** the agent prompt based on what actually failed in production
-5. **Extend** the eval test suite with new cases derived from real failures,
-   so future regressions are caught before they reach users
+2. **Log** every session to BigQuery via the plugin
+3. **Evaluate** logged sessions using the SDK's quality evaluation
+4. **Improve** the agent prompt based on what actually failed
+5. **Extend** the eval suite with new cases derived from real failures,
+   so regressions are caught before they reach users
 6. **Repeat** until quality stabilizes
 
 The hero moment: quality climbs from ~30% to ~90%+ across 3 cycles.
@@ -30,14 +37,14 @@ The hero moment: quality climbs from ~30% to ~90%+ across 3 cycles.
 ### Why This Matters
 
 Static eval suites go stale. Users ask questions you never anticipated.
-The BigQuery Agent Analytics plugin captures every real interaction, and
-the SDK's quality evaluation scores them automatically. The improver reads
-those scores, identifies the failure patterns, fixes the prompt, and
-generates new eval cases so the same failures never recur.
+The plugin captures every real interaction, and the SDK's quality
+evaluation scores them automatically. The improver reads those scores,
+identifies the failure patterns, fixes the prompt, and generates new
+eval cases so the same failures never recur.
 
-Each cycle, the eval suite grows with cases sourced from actual production
-failures. Over time, your tests reflect what users actually ask, not what
-you imagined they would ask.
+Each cycle, the eval suite grows with cases sourced from actual
+production failures. Over time, your tests reflect what users actually
+ask, not what you imagined they would ask.
 
 ## Architecture
 
@@ -95,9 +102,10 @@ Each cycle:
 
 1. **Eval** - `run_eval.py` sends questions to the agent. Sessions are
    logged to BigQuery via the analytics plugin.
-2. **Analyze** - `quality_report.py --app-name --output-json` reads the
-   logged sessions from BigQuery and scores each one with LLM-as-a-judge
-   metrics: was the response helpful? Was it grounded in tool output?
+2. **Analyze** - The SDK's `quality_report.py` reads logged sessions from
+   BigQuery, evaluates each one (was the response useful? was it grounded
+   in tool output?), and writes a structured JSON report. The `--app-name`
+   flag scopes evaluation to this agent only.
 3. **Improve** - `improve_agent.py` reads the quality report JSON, calls
    Gemini to generate a fixed prompt addressing the specific failures, and
    adds new eval cases targeting those failure modes.
@@ -107,9 +115,9 @@ Each cycle:
 ### Data Flow
 
 ```
-Agent sessions  -->  BigQuery  -->  quality_report.py  -->  improve_agent.py
-(via plugin)         (storage)      (LLM-as-judge)          (prompt fix +
-                                                             new eval cases)
+Agent sessions  -->  BigQuery  -->  SDK quality evaluation  -->  improve_agent.py
+(via plugin)         (storage)      (quality_report.py)          (prompt fix +
+                                                                  new eval cases)
 ```
 
 ## Quick Start
@@ -118,30 +126,69 @@ Agent sessions  -->  BigQuery  -->  quality_report.py  -->  improve_agent.py
 
 - Python 3.10+
 - Google Cloud project with BigQuery enabled
-- `gcloud` CLI authenticated
+- `gcloud` CLI authenticated (`gcloud auth application-default login`)
 
-### Setup
+### 1. Configure environment
+
+Set your GCP project:
+
+```bash
+export PROJECT_ID=my-project-id
+```
+
+All other variables have sensible defaults. Only set them if you need different values:
+
+```bash
+# BigQuery dataset for session logs (defaults shown)
+DATASET_ID=agent_logs
+BQ_LOCATION=us-central1
+TABLE_ID=agent_events
+
+# Agent model (defaults shown)
+DEMO_MODEL_ID=gemini-2.5-flash
+DEMO_AGENT_LOCATION=us-central1
+```
+
+### 2. Run setup
 
 ```bash
 ./setup.sh
 ```
 
-### Run the Demo
+This installs dependencies, verifies credentials, and creates the
+BigQuery dataset if it does not exist.
+
+### 3. Run the demo
 
 ```bash
-# Single cycle
+# Single improvement cycle
 ./run_cycle.sh
 
-# Full demo: 3 cycles, watch the score climb
+# Full demo: 3 cycles, watch the score climb from ~30% to ~90%
 ./run_cycle.sh --cycles 3
 
-# Eval only (no improvement)
+# Eval only (no improvement step)
 ./run_cycle.sh --eval-only
+```
+
+### 4. Inspect results
+
+After a run, check the `reports/` directory:
+
+```bash
+# Quality report JSON (consumed by the improver)
+cat reports/quality_report_cycle_1.json | python3 -m json.tool | head -20
+
+# See how the prompt evolved
+cat agent/prompts.py
+
+# See new eval cases added by the improver
+cat eval/eval_cases.json
 ```
 
 ### Reset to V1
 
-To start over, reset the prompt and eval cases:
+To start over, reset the prompt and eval cases to their original state:
 
 ```bash
 git checkout -- agent/prompts.py eval/eval_cases.json
@@ -155,17 +202,16 @@ git checkout -- agent/prompts.py eval/eval_cases.json
   this specific agent, filtering out other agents sharing the same dataset
 - **`quality_report.py --output-json`** - structured quality report for
   automated consumption by the improver
-- **LLM-as-a-judge metrics** - `response_usefulness` (was it helpful?) and
-  `task_grounding` (was it based on tool output, not hallucination?)
+- **Categorical evaluation metrics** - `response_usefulness` (was it
+  helpful?) and `task_grounding` (was it based on tool output?)
 
 ## Configuration
 
-Environment variables (set in `src/.env` or export directly):
-
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TEST_DATASET_ID` | `agent_logs` | BigQuery dataset for session logs |
-| `TEST_BQ_LOCATION` | `us-central1` | BigQuery dataset location |
-| `TEST_TABLE_ID` | `agent_events` | BigQuery table name |
+| `PROJECT_ID` | from `gcloud` | Google Cloud project ID (required) |
+| `DATASET_ID` | `agent_logs` | BigQuery dataset for session logs |
+| `BQ_LOCATION` | `us-central1` | BigQuery dataset location |
+| `TABLE_ID` | `agent_events` | BigQuery table name |
 | `DEMO_MODEL_ID` | `gemini-2.5-flash` | Model for the demo agent |
 | `DEMO_AGENT_LOCATION` | `us-central1` | Vertex AI location |

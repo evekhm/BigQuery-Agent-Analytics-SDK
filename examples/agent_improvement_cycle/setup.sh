@@ -79,9 +79,9 @@ echo "  Dependencies installed."
 echo ""
 echo "[4/4] Configuring environment..."
 
-DATASET_ID="${TEST_DATASET_ID:-agent_logs}"
-BQ_LOCATION="${TEST_BQ_LOCATION:-us-central1}"
-TABLE_ID="${TEST_TABLE_ID:-agent_events}"
+DATASET_ID="${DATASET_ID:-agent_logs}"
+BQ_LOCATION="${BQ_LOCATION:-us-central1}"
+TABLE_ID="${TABLE_ID:-agent_events}"
 
 # Create BigQuery dataset if it doesn't exist
 if ! bq show "${PROJECT_ID}:${DATASET_ID}" &>/dev/null 2>&1; then
@@ -94,9 +94,9 @@ if [[ ! -f "$ENV_FILE" ]]; then
   cat > "$ENV_FILE" <<EOF
 # Agent Improvement Cycle Demo Configuration
 GOOGLE_CLOUD_PROJECT=$PROJECT_ID
-TEST_DATASET_ID=$DATASET_ID
-TEST_BQ_LOCATION=$BQ_LOCATION
-TEST_TABLE_ID=$TABLE_ID
+DATASET_ID=$DATASET_ID
+BQ_LOCATION=$BQ_LOCATION
+TABLE_ID=$TABLE_ID
 DEMO_MODEL_ID=gemini-2.5-flash
 DEMO_AGENT_LOCATION=us-central1
 EOF
