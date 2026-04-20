@@ -29,11 +29,24 @@ import os
 import re
 import sys
 
+from dotenv import load_dotenv
 from google import genai
+import google.auth
 from google.genai.types import GenerateContentConfig
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _DEMO_DIR = os.path.dirname(_SCRIPT_DIR)
+
+# Load environment and configure Vertex AI
+_env_path = os.path.join(_DEMO_DIR, "../../../.env")
+if os.path.exists(_env_path):
+  load_dotenv(dotenv_path=_env_path)
+
+_, _project_id = google.auth.default()
+_location = os.getenv("DEMO_AGENT_LOCATION", "us-central1")
+os.environ["GOOGLE_CLOUD_PROJECT"] = _project_id
+os.environ["GOOGLE_CLOUD_LOCATION"] = _location
+os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
 _PROMPTS_PATH = os.path.join(_DEMO_DIR, "agent", "prompts.py")
 _EVAL_CASES_PATH = os.path.join(_DEMO_DIR, "eval", "eval_cases.json")
 
@@ -167,9 +180,10 @@ def call_improver(current_prompt, current_version, report):
       problem_sessions=format_problem_sessions(report),
   )
 
+  model_id = os.getenv("DEMO_MODEL_ID", "gemini-2.5-flash")
   client = genai.Client()
   response = client.models.generate_content(
-      model="gemini-2.5-flash",
+      model=model_id,
       contents=prompt,
       config=GenerateContentConfig(
           temperature=0.2,
@@ -191,11 +205,17 @@ def write_improved_prompt(improved_prompt, changes_summary, current_version):
   if len(improved_prompt.strip()) < 50:
     raise ValueError("Improved prompt is too short, likely invalid")
 
+  # Sanitize for safe Python embedding
+  safe_summary = changes_summary.replace("\n", " ").strip()
+  triple_q = '"' * 3
+  safe_prompt = improved_prompt.replace(triple_q, "\\\"\\\"\\\"")
+
   # Build the new version block
   new_block = (
-      f"\n\n# --- Version {new_version}: Improvements from cycle {current_version} ---\n"
-      f"# Changes: {changes_summary}\n"
-      f'PROMPT_V{new_version} = """{improved_prompt}\n"""\n'
+      f"\n\n# --- Version {new_version}: Improvements from cycle"
+      f" {current_version} ---\n"
+      f"# Changes: {safe_summary}\n"
+      f'PROMPT_V{new_version} = """{safe_prompt}\n"""\n'
   )
 
   # Replace CURRENT_PROMPT and CURRENT_VERSION
@@ -273,16 +293,24 @@ def main():
     print("  Quality is already high (>=95%). No improvement needed.")
     return
 
-  # Call Gemini to generate improvements
-  print("  Calling Gemini to generate improvements...")
-  result = call_improver(current_prompt, current_version, report)
-
-  # Write improved prompt
-  new_version = write_improved_prompt(
-      result["improved_prompt"],
-      result["changes_summary"],
-      current_version,
-  )
+  # Call Gemini to generate improvements (retry on syntax errors)
+  for attempt in range(3):
+    print(
+        f"  Calling Gemini to generate improvements (attempt {attempt + 1})..."
+    )
+    result = call_improver(current_prompt, current_version, report)
+    try:
+      new_version = write_improved_prompt(
+          result["improved_prompt"],
+          result["changes_summary"],
+          current_version,
+      )
+      break
+    except ValueError as e:
+      print(f"  Warning: {e}")
+      if attempt == 2:
+        raise
+      print("  Retrying...")
   print(f"  Written PROMPT_V{new_version} to prompts.py")
   print(f"  Changes: {result['changes_summary']}")
 

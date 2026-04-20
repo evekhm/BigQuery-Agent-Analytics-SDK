@@ -101,9 +101,8 @@ for cycle in $(seq 1 "$CYCLES"); do
   python3 "$REPO_ROOT/src/scripts/quality_report.py" \
     --app-name "$APP_NAME" \
     --output-json "$REPORT_JSON" \
-    --report \
-    --limit 50 \
-    --time-period 24h
+    --limit 15 \
+    --time-period 24h || true
 
   if [[ ! -f "$REPORT_JSON" ]]; then
     echo "ERROR: Quality report was not generated at $REPORT_JSON" >&2
