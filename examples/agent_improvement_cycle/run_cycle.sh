@@ -60,7 +60,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REPORTS_DIR="$SCRIPT_DIR/reports"
 
 # Defaults
@@ -157,7 +157,7 @@ for cycle in $(seq 1 "$CYCLES"); do
   sleep 5  # Allow BigQuery writes to propagate
 
   REPORT_JSON="$REPORTS_DIR/quality_report_cycle_${cycle}.json"
-  python3 "$REPO_ROOT/src/scripts/quality_report.py" \
+  python3 "$REPO_ROOT/scripts/quality_report.py" \
     --app-name "$APP_NAME" \
     --output-json "$REPORT_JSON" \
     --limit 15 \
