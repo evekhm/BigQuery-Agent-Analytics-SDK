@@ -518,18 +518,61 @@ the compiler rejects bindings that target them.
 
 ### 17.3 SKOS mapping table
 
+Entity typing:
+
 | SKOS construct | Ontology equivalent | Notes |
 |---|---|---|
 | `skos:Concept` (no `owl:Class`) | Abstract entity with `skos_` prefix | Keys not required |
 | `owl:Class` + `skos:Concept` | Concrete entity, unprefixed | OWL provides structure |
-| `skos:prefLabel` | `synonyms` (when different from name) | Label data |
-| `skos:altLabel`, `skos:hiddenLabel` | `synonyms` | Label data |
+| `skos:ConceptScheme` | Currently dropped | Not emitted; deferred |
+
+Labels and synonyms (language selection applies — see 17.5):
+
+| SKOS construct | Ontology equivalent | Notes |
+|---|---|---|
+| `skos:prefLabel` (selected language) | `synonyms` (when different from name) | Label data |
+| `skos:altLabel` (selected language) | `synonyms` | Label data |
+| `skos:hiddenLabel` (selected language) | `synonyms` | Label data |
+| `skos:prefLabel` (other language) | Annotation `skos:prefLabel@<lang>` | Preserved verbatim |
+| `skos:altLabel` (other language) | Annotation `skos:altLabel@<lang>` | Preserved verbatim |
+| `skos:hiddenLabel` (other language) | Annotation `skos:hiddenLabel@<lang>` | Preserved verbatim |
+
+Literal-valued predicates (all preserved as annotations, colon-prefixed):
+
+| SKOS construct | Ontology equivalent | Notes |
+|---|---|---|
 | `skos:definition` | Annotation `skos:definition` | Not promoted to description |
-| `skos:broader`, `skos:narrower` | Abstract relationship `skos_broader` (narrower normalized) | |
-| `skos:related` | Abstract relationship `skos_related` | |
-| `skos:exactMatch` etc. | Abstract relationship if target imported; annotation if external IRI | |
-| `skos:notation`, `skos:scopeNote`, etc. | Annotation with `skos:` prefix | |
-| `skos:inScheme`, `skos:topConceptOf` | Annotation with `skos:` prefix | |
+| `skos:notation` | Annotation `skos:notation` | |
+| `skos:scopeNote` | Annotation `skos:scopeNote` | |
+| `skos:example` | Annotation `skos:example` | |
+| `skos:historyNote` | Annotation `skos:historyNote` | |
+| `skos:editorialNote` | Annotation `skos:editorialNote` | |
+| `skos:changeNote` | Annotation `skos:changeNote` | |
+
+Reference predicates (IRI target stored as local name):
+
+| SKOS construct | Ontology equivalent | Notes |
+|---|---|---|
+| `skos:inScheme` | Annotation `skos:inScheme` | |
+| `skos:topConceptOf` | Annotation `skos:topConceptOf` | |
+
+Graph-shaped predicates (abstract relationships):
+
+| SKOS construct | Ontology equivalent | Notes |
+|---|---|---|
+| `skos:broader` | Abstract relationship `skos_broader` | |
+| `skos:narrower` | Abstract relationship `skos_broader` (endpoints swapped) | Normalized to broader |
+| `skos:related` | Abstract relationship `skos_related` | Emitted once per subject–object pair |
+
+Match predicates (relationship if target imported, annotation otherwise):
+
+| SKOS construct | Ontology equivalent | Notes |
+|---|---|---|
+| `skos:exactMatch` | Abstract `skos_exactMatch` / annotation `skos:exactMatch` | |
+| `skos:closeMatch` | Abstract `skos_closeMatch` / annotation `skos:closeMatch` | |
+| `skos:broadMatch` | Abstract `skos_broadMatch` / annotation `skos:broadMatch` | |
+| `skos:narrowMatch` | Abstract `skos_narrowMatch` / annotation `skos:narrowMatch` | |
+| `skos:relatedMatch` | Abstract `skos_relatedMatch` / annotation `skos:relatedMatch` | External IRI stored verbatim |
 
 ### 17.4 Relationship uniqueness
 
