@@ -67,7 +67,7 @@ fi
 CYCLES=1
 EVAL_ONLY=false
 APP_NAME="company_info_agent"
-TRAFFIC_COUNT=15
+TRAFFIC_COUNT=10
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -95,7 +95,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --cycles N         Run N improvement cycles (default: 1)"
       echo "  --eval-only        Only run evaluation (Steps 1-3), skip prompt improvement"
       echo "  --app-name X       Agent app name for filtering (default: company_info_agent)"
-      echo "  --traffic-count N  Number of synthetic questions per cycle (default: 15)"
+      echo "  --traffic-count N  Number of synthetic questions per cycle (default: 10)"
       echo "  -h, --help         Show this help message"
       exit 0
       ;;
@@ -120,7 +120,7 @@ echo "============================================"
 echo ""
 
 for cycle in $(seq 1 "$CYCLES"); do
-  TOTAL_STEPS=$( $EVAL_ONLY && echo 3 || echo 4 )
+  TOTAL_STEPS=$( $EVAL_ONLY && echo 3 || echo 5 )
 
   echo ""
   echo "--------------------------------------------"
@@ -136,7 +136,7 @@ for cycle in $(seq 1 "$CYCLES"); do
   # -----------------------------------------------------------------------
   echo ""
   echo "[Step 1/$TOTAL_STEPS] Generating synthetic user traffic..."
-  TRAFFIC_JSON="$REPORTS_DIR/synthetic_traffic_cycle_${cycle}.json"
+  TRAFFIC_JSON="$SCRIPT_DIR/eval/synthetic_traffic_cycle_${cycle}.json"
   python3 -W ignore::UserWarning "$SCRIPT_DIR/eval/generate_traffic.py" \
     --count "$TRAFFIC_COUNT" \
     --output "$TRAFFIC_JSON"
@@ -218,12 +218,66 @@ print(f\"  ({s.get('meaningful', '?')} meaningful, {s.get('partial', '?')} parti
   if [[ "$EVAL_ONLY" == "true" ]]; then
     echo ""
     echo "  --eval-only: skipping improvement step."
-  else
     echo ""
-    echo "[Step 4/$TOTAL_STEPS] Auto-improving agent prompt..."
-    echo "  Gemini analyzes failures, rewrites the prompt, validates against golden eval."
-    python3 "$SCRIPT_DIR/improver/improve_agent.py" "$REPORT_JSON"
+    echo "  Cycle $cycle complete."
+    continue
   fi
+
+  # Show golden eval set growth
+  GOLDEN_BEFORE=$(python3 -c "
+import json
+with open('$SCRIPT_DIR/eval/eval_cases.json') as f:
+    print(len(json.load(f)['eval_cases']))
+")
+  echo ""
+  echo "[Step 4/$TOTAL_STEPS] Auto-improving agent prompt..."
+  echo "  Gemini analyzes failures, rewrites the prompt, validates against golden eval."
+  python3 "$SCRIPT_DIR/improver/improve_agent.py" "$REPORT_JSON"
+
+  GOLDEN_AFTER=$(python3 -c "
+import json
+with open('$SCRIPT_DIR/eval/eval_cases.json') as f:
+    print(len(json.load(f)['eval_cases']))
+")
+  if [[ "$GOLDEN_BEFORE" != "$GOLDEN_AFTER" ]]; then
+    echo ""
+    echo "  Golden eval set: $GOLDEN_BEFORE -> $GOLDEN_AFTER cases (failed cases extracted as new regression tests)"
+  fi
+
+  # -----------------------------------------------------------------------
+  # STEP 5: Measure improvement
+  #
+  # Re-run the SAME synthetic traffic with the improved prompt to
+  # measure the effect directly.  Uses --golden mode (throwaway agent,
+  # no BQ logging, LLM judge) so results are immediate and accurate --
+  # no BigQuery propagation delays.
+  # -----------------------------------------------------------------------
+  echo ""
+  echo "[Step 5/$TOTAL_STEPS] Measuring improvement (re-running same traffic with improved prompt)..."
+  python3 -W ignore::UserWarning "$SCRIPT_DIR/eval/run_eval.py" \
+    --golden \
+    --eval-cases "$TRAFFIC_JSON"
+
+  # Print before/after comparison
+  REEVAL_RESULTS="$SCRIPT_DIR/reports/latest_eval_results.json"
+  echo ""
+  python3 -c "
+import json
+with open('$REPORT_JSON') as f:
+    before = json.load(f)
+with open('$REEVAL_RESULTS') as f:
+    after_results = json.load(f)
+b = before.get('summary', {})
+after_passed = sum(1 for r in after_results if r.get('pass', False))
+after_total = len(after_results)
+after_rate = round(100 * after_passed / after_total) if after_total else 0
+print('  ┌─────────────────────────────────────────────┐')
+print('  │           Before / After Improvement         │')
+print('  ├─────────────────────────────────────────────┤')
+print(f\"  │  Before:  {b.get('meaningful_rate', '?'):>3}% meaningful  ({b.get('meaningful', '?')} of {b.get('total_sessions', '?')})\")
+print(f\"  │  After:   {after_rate:>3}% pass rate    ({after_passed} of {after_total})\")
+print('  └─────────────────────────────────────────────┘')
+"
 
   echo ""
   echo "  Cycle $cycle complete."

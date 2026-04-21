@@ -24,12 +24,29 @@ import json
 import os
 import sys
 
+from dotenv import load_dotenv
+from google import genai
 from google.adk.runners import InMemoryRunner
+import google.auth
 from google.genai.types import Content
+from google.genai.types import GenerateContentConfig
 from google.genai.types import Part
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _DEMO_DIR = os.path.dirname(_SCRIPT_DIR)
+
+# Load environment and configure Vertex AI
+_env_path = os.path.join(_DEMO_DIR, ".env")
+if os.path.exists(_env_path):
+  load_dotenv(dotenv_path=_env_path)
+
+_, _auth_project = google.auth.default()
+_project_id = os.getenv("PROJECT_ID") or _auth_project
+os.environ["GOOGLE_CLOUD_PROJECT"] = _project_id
+os.environ["GOOGLE_CLOUD_LOCATION"] = os.getenv(
+    "DEMO_AGENT_LOCATION", "us-central1"
+)
+os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
 
 # Add parent to path so we can import the agent
 sys.path.insert(0, _DEMO_DIR)
@@ -48,7 +65,7 @@ async def run_single_case(
 ) -> dict:
   """Run a single eval case and return the response."""
   session = await runner.session_service.create_session(
-      app_name="company_info_agent",
+      app_name=runner.app_name,
       user_id=user_id,
   )
 
@@ -80,7 +97,7 @@ async def run_single_case(
 async def run_all_cases(eval_cases_path: str | None = None) -> list[dict]:
   """Run all eval cases and print results."""
   cases = load_eval_cases(eval_cases_path)
-  print(f"\nRunning {len(cases)} eval cases...\n")
+  print(f"\nRunning {len(cases)} cases...\n")
 
   from agent.agent import bq_logging_plugin
   from agent.agent import root_agent
@@ -93,11 +110,11 @@ async def run_all_cases(eval_cases_path: str | None = None) -> list[dict]:
 
   results = []
   for i, case in enumerate(cases, 1):
-    print(f"  [{i}/{len(cases)}] {case['id']}: {case['question'][:60]}...")
+    print(f"  [{i}/{len(cases)}] {case['id']}: {case['question']}")
     try:
       result = await run_single_case(runner, case)
-      resp_preview = result["response"][:80].replace("\n", " ")
-      print(f"           -> {resp_preview}...")
+      resp_text = result["response"].replace("\n", " ").strip()
+      print(f"           -> {resp_text}")
       results.append(result)
     except Exception as e:
       print(f"           -> ERROR: {e}")
@@ -116,6 +133,97 @@ async def run_all_cases(eval_cases_path: str | None = None) -> list[dict]:
   return results
 
 
+GOLDEN_JUDGE_PROMPT = """You are evaluating an AI agent's response to a policy question.
+
+Question: {question}
+Response: {response}
+
+Return JSON with exactly these fields:
+{{
+  "pass": true or false,
+  "reason": "one-sentence explanation"
+}}
+
+A response PASSES if it provides a specific, substantive answer to the question.
+A response FAILS if it says "I don't know", defers to HR, or gives vague/generic information without specifics.
+Return ONLY the JSON, no other text.
+"""
+
+
+async def run_golden_eval(eval_cases_path: str | None = None) -> list[dict]:
+  """Run golden eval cases with LLM judge, no BQ logging.
+
+  Creates a throwaway agent with the current prompt and scores each
+  response with a lightweight LLM judge.  Returns results with
+  pass/fail verdicts.
+  """
+  from agent.tools import get_current_date
+  from agent.tools import lookup_company_policy
+  from google.adk.agents import Agent
+
+  sys.path.insert(0, _DEMO_DIR)
+  from agent.prompts import CURRENT_PROMPT
+
+  cases = load_eval_cases(eval_cases_path)
+  model_id = os.getenv("DEMO_MODEL_ID", "gemini-2.5-flash")
+
+  test_agent = Agent(
+      name="golden_eval_agent",
+      model=model_id,
+      description="An agent that answers questions about company policies.",
+      instruction=CURRENT_PROMPT,
+      tools=[lookup_company_policy, get_current_date],
+  )
+
+  runner = InMemoryRunner(agent=test_agent, app_name="golden_eval")
+  client = genai.Client()
+
+  print(f"\nRunning golden eval ({len(cases)} cases, no BQ logging)...\n")
+
+  results = []
+  passed = 0
+  for i, case in enumerate(cases, 1):
+    result = await run_single_case(runner, case, user_id="golden_eval")
+
+    judge_prompt = GOLDEN_JUDGE_PROMPT.format(
+        question=case["question"],
+        response=result["response"][:500],
+    )
+    judge_response = client.models.generate_content(
+        model=model_id,
+        contents=judge_prompt,
+        config=GenerateContentConfig(
+            temperature=0.0,
+            response_mime_type="application/json",
+        ),
+    )
+    verdict = json.loads(judge_response.text)
+    pass_fail = verdict.get("pass", False)
+    reason = verdict.get("reason", "")
+
+    if pass_fail:
+      passed += 1
+      print(f"  [{i}/{len(cases)}] PASS: {case['id']}")
+    else:
+      print(f"  [{i}/{len(cases)}] FAIL: {case['id']} - {reason}")
+
+    result["pass"] = pass_fail
+    result["reason"] = reason
+    results.append(result)
+
+  total = len(cases)
+  print(f"\nGolden eval: {passed}/{total} passed.")
+  if passed == total:
+    print("All golden cases pass. Ready to run the improvement cycle.")
+  else:
+    print(
+        f"{total - passed} case(s) failed. Fix the prompt before running"
+        " the cycle."
+    )
+
+  return results
+
+
 def main() -> None:
   import argparse
 
@@ -128,9 +236,17 @@ def main() -> None:
       default=None,
       help="Path to eval_cases.json (default: eval/eval_cases.json)",
   )
+  parser.add_argument(
+      "--golden",
+      action="store_true",
+      help="Run golden eval with LLM judge (no BQ logging, pass/fail verdict)",
+  )
   args = parser.parse_args()
 
-  results = asyncio.run(run_all_cases(args.eval_cases))
+  if args.golden:
+    results = asyncio.run(run_golden_eval(args.eval_cases))
+  else:
+    results = asyncio.run(run_all_cases(args.eval_cases))
 
   # Write results to a file for reference
   results_path = os.path.join(_DEMO_DIR, "reports", "latest_eval_results.json")

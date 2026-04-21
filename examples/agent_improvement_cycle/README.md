@@ -4,6 +4,8 @@ Demonstrates a closed-loop agent improvement cycle powered by the
 **BigQuery Agent Analytics SDK**. The cycle learns from real agent
 sessions logged in production, not just synthetic test cases.
 
+For a guided walkthrough, see the [Demo Script](DEMO_SCRIPT.md).
+
 ## The Problem
 
 When you design eval cases for an agent, you are guessing what users
@@ -78,8 +80,9 @@ setup.sh             # One-time setup (auth, deps, BigQuery dataset)
 This demo uses two distinct sets of questions:
 
 - **Golden eval set** (`eval_cases.json`): The regression gate. These
-  cases must always pass. The set starts with 10 cases and grows each
-  cycle as failed synthetic cases are extracted into it.
+  cases must always pass. The set starts with 3 cases that V1 handles
+  correctly and grows each cycle as failed synthetic cases are
+  extracted into it.
 - **Synthetic traffic**: Generated fresh each cycle by Gemini. These
   simulate diverse, unpredictable user questions that differ from the
   golden set. They are the source of new failures that drive improvement.
@@ -285,7 +288,7 @@ After a run, check the `reports/` directory:
 cat reports/quality_report_cycle_1.json | python3 -m json.tool | head -20
 
 # Synthetic traffic that was generated
-cat reports/synthetic_traffic_cycle_1.json | python3 -m json.tool | head -20
+cat eval/synthetic_traffic_cycle_1.json | python3 -m json.tool | head -20
 
 # See how the prompt evolved
 cat agent/prompts.py

@@ -88,7 +88,7 @@ def load_existing_questions() -> list[str]:
   return [c["question"] for c in data.get("eval_cases", [])]
 
 
-def generate_traffic(count: int = 15) -> list[dict]:
+def generate_traffic(count: int = 10) -> list[dict]:
   """Call Gemini to generate synthetic traffic cases."""
   existing = load_existing_questions()
   existing_formatted = "\n".join(f"- {q}" for q in existing)
@@ -120,19 +120,19 @@ def main() -> None:
   parser.add_argument(
       "--count",
       type=int,
-      default=15,
-      help="Number of synthetic questions to generate (default: 15)",
+      default=10,
+      help="Number of synthetic questions to generate (default: 10)",
   )
   parser.add_argument(
       "--output",
       type=str,
       default=None,
-      help="Output file path (default: reports/synthetic_traffic.json)",
+      help="Output file path (default: eval/synthetic_traffic.json)",
   )
   args = parser.parse_args()
 
   output_path = args.output or os.path.join(
-      _DEMO_DIR, "reports", "synthetic_traffic.json"
+      _SCRIPT_DIR, "synthetic_traffic.json"
   )
   os.makedirs(os.path.dirname(output_path), exist_ok=True)
 

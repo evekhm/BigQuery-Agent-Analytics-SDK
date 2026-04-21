@@ -45,17 +45,34 @@ guide the agent to use them.
 
 ---
 
-## Show the Golden Eval Set (20s)
+## Show and Run the Golden Eval Set (60s)
 
 **Command:**
 ```shell
 cat eval/eval_cases.json
 ```
 
-This is the golden eval set -- the regression gate. Ten cases that the
-agent must always pass. Three are straightforward ("How many PTO days
-do I get?"), seven target the blind spots. The golden set starts here
-and grows each cycle as failed cases are extracted into it.
+This is the golden eval set -- the regression gate. Three cases that
+the V1 prompt already handles correctly: PTO days, sick leave, and
+remote work. The golden set starts small and grows each cycle as
+failed synthetic cases are extracted into it.
+
+Before starting the improvement cycle, verify the golden set passes
+with the current V1 prompt. This runs each case through a throwaway
+agent (no BigQuery logging) and uses an LLM judge to score each
+response pass or fail.
+
+**Command:**
+```shell
+python3 eval/run_eval.py --golden
+```
+
+*(as output scrolls)* All three cases pass. The V1 prompt handles these
+basic questions correctly.
+
+These cases are the floor. No prompt change is accepted unless every
+golden case still passes. As the cycle runs, failed synthetic cases
+get added here, raising the bar each iteration.
 
 ---
 
@@ -121,8 +138,8 @@ Then the failed synthetic cases are extracted from the quality report
 and added to the golden eval set. Next cycle, those cases become part
 of the regression gate.
 
-*(point to output)* V1 becomes V2. The golden set grows from 10 to
-roughly 14-16 cases.
+*(point to output)* V1 becomes V2. The golden set grows from 3 to
+roughly 8-10 cases.
 
 ---
 
@@ -159,8 +176,8 @@ git diff eval/eval_cases.json
 ```
 
 Three prompt versions, each one addressing specific failures from the
-previous cycle's synthetic traffic. The golden eval set grew from 10
-cases to roughly 20+, each new case extracted from a real failure.
+previous cycle's synthetic traffic. The golden eval set grew from 3
+cases to roughly 15+, each new case extracted from a real failure.
 
 The key idea: the golden eval set is the regression gate. Synthetic
 traffic discovers new failures. The improver fixes the prompt. The
