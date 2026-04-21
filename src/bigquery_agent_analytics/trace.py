@@ -254,11 +254,19 @@ class Span:
   def tool_name(self) -> Optional[str]:
     """Returns the tool name for tool-related events.
 
-    Populated for ``TOOL_STARTING``, ``TOOL_COMPLETED``,
-    ``TOOL_ERROR``, and ``HITL_*`` events where the plugin writes
-    the tool name into ``content.tool``. Returns ``None`` for
-    spans that do not describe a tool invocation.
+    Populated only for ``TOOL_STARTING``, ``TOOL_COMPLETED``,
+    ``TOOL_ERROR``, and ``HITL_*`` event types where the plugin
+    writes the tool name into ``content.tool``. Returns ``None``
+    for any other event type, even if ``content`` happens to
+    carry a ``"tool"`` key — callers rely on this attribute
+    meaning "this span invoked a tool."
     """
+    if self.event_type not in (
+        "TOOL_STARTING",
+        "TOOL_COMPLETED",
+        "TOOL_ERROR",
+    ) and not self.event_type.startswith("HITL_"):
+      return None
     tool = self.content.get("tool")
     return tool if tool else None
 

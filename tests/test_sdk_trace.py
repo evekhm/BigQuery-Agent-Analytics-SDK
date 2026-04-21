@@ -165,6 +165,28 @@ class TestSpan:
     )
     assert span.tool_name is None
 
+  def test_tool_name_does_not_leak_for_non_tool_event_with_tool_key(self):
+    """Non-tool events carrying an incidental content['tool'] key must
+    NOT surface it as tool_name. The attribute means "this span invoked
+    a tool" — arbitrary payloads that happen to use the same key name
+    should return None."""
+    span = Span(
+        event_type="AGENT_THOUGHT",
+        agent="agent",
+        timestamp=datetime.now(timezone.utc),
+        content={"tool": "looks_like_a_tool_but_isnt", "note": "reasoning"},
+    )
+    assert span.tool_name is None
+
+  def test_tool_name_does_not_leak_for_llm_response_with_tool_key(self):
+    span = Span(
+        event_type="LLM_RESPONSE",
+        agent="agent",
+        timestamp=datetime.now(timezone.utc),
+        content={"response": "I'll use a tool", "tool": "mentioned_in_text"},
+    )
+    assert span.tool_name is None
+
   def test_summary_with_text(self):
     span = Span(
         event_type="USER_MESSAGE_RECEIVED",
@@ -423,6 +445,37 @@ class TestTrace:
     trace = Trace(trace_id="t1", session_id="sess-1", spans=spans)
     output = trace.render(color=True)
     assert "\x1b[" not in output
+
+  def test_render_handles_unicode_tool_names(self):
+    """Non-ASCII tool names must not crash render() and must preserve
+    the tree-connector structure on each line. Display-width alignment
+    in monospace fonts is a known limitation (tracked separately) —
+    this test pins the minimum: no exceptions, connectors emitted."""
+    ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    spans = [
+        Span(
+            event_type="TOOL_STARTING",
+            agent="agent",
+            timestamp=ts,
+            content={"tool": "搜索联系人"},
+            span_id="s1",
+        ),
+        Span(
+            event_type="TOOL_COMPLETED",
+            agent="agent",
+            timestamp=ts,
+            content={"tool": "🔍_fuzzy_search", "result": "ok"},
+            span_id="s2",
+            parent_span_id="s1",
+            latency_ms=50,
+        ),
+    ]
+    trace = Trace(trace_id="t1", session_id="sess-1", spans=spans)
+    output = trace.render()
+    assert "搜索联系人" in output
+    assert "🔍_fuzzy_search" in output
+    # tree connectors present on every non-header line
+    assert "\u2514\u2500" in output or "\u251c\u2500" in output
 
   def test_render_flat_no_span_ids(self):
     ts = datetime.now(timezone.utc)
