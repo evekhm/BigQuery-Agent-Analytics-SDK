@@ -543,7 +543,8 @@ def run_eval(args):
     output = _build_json_output(result["report"], result["resolved_map"])
     if args.output_json == "-":
       json.dump(output, sys.stdout, indent=2, default=str)
-      print(f"\n  JSON report: (stdout)")
+      sys.stdout.write("\n")
+      print("  JSON report: (stdout)", file=sys.stderr)
     else:
       json_path = os.path.abspath(args.output_json)
       os.makedirs(os.path.dirname(json_path), exist_ok=True)
@@ -1127,14 +1128,17 @@ Examples:
       "--app-name",
       type=str,
       default=None,
-      help="Filter to sessions from a specific agent app name (root_agent_name)",
+      help="Filter to sessions from a specific agent app name. Matches the "
+           "root_agent_name attribute set by BigQueryAgentAnalyticsPlugin; "
+           "sessions from other sources may not populate this field",
   )
   parser.add_argument(
       "--output-json",
       type=str,
       default=None,
       metavar="PATH",
-      help="Write structured evaluation results as JSON to the given file path",
+      help="Write structured evaluation results as JSON to the given file path "
+           "(writes all sessions regardless of --samples)",
   )
   parser.add_argument(
       "--threshold",

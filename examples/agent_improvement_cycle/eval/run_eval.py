@@ -23,7 +23,6 @@ import asyncio
 import json
 import os
 import sys
-import uuid
 
 from google.adk.runners import InMemoryRunner
 from google.genai.types import Content
@@ -36,7 +35,7 @@ _DEMO_DIR = os.path.dirname(_SCRIPT_DIR)
 sys.path.insert(0, _DEMO_DIR)
 
 
-def load_eval_cases(path=None):
+def load_eval_cases(path: str | None = None) -> list[dict]:
   """Load evaluation cases from JSON file."""
   path = path or os.path.join(_SCRIPT_DIR, "eval_cases.json")
   with open(path) as f:
@@ -44,14 +43,13 @@ def load_eval_cases(path=None):
   return data["eval_cases"]
 
 
-async def run_single_case(runner, case, user_id="eval_user"):
+async def run_single_case(
+    runner: InMemoryRunner, case: dict, user_id: str = "eval_user"
+) -> dict:
   """Run a single eval case and return the response."""
-  session_id = f"eval_{case['id']}_{uuid.uuid4().hex[:8]}"
-
   session = await runner.session_service.create_session(
       app_name="company_info_agent",
       user_id=user_id,
-      session_id=session_id,
   )
 
   user_message = Content(
@@ -79,7 +77,7 @@ async def run_single_case(runner, case, user_id="eval_user"):
   }
 
 
-async def run_all_cases(eval_cases_path=None):
+async def run_all_cases(eval_cases_path: str | None = None) -> list[dict]:
   """Run all eval cases and print results."""
   cases = load_eval_cases(eval_cases_path)
   print(f"\nRunning {len(cases)} eval cases...\n")
@@ -118,7 +116,7 @@ async def run_all_cases(eval_cases_path=None):
   return results
 
 
-def main():
+def main() -> None:
   import argparse
 
   parser = argparse.ArgumentParser(

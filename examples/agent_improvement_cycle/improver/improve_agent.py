@@ -104,13 +104,73 @@ Return ONLY the JSON, no other text.
 """
 
 
-def load_quality_report(path):
+VALIDATION_PROMPT = """You are a quality reviewer for AI agent system prompts. Compare the original and improved prompts and determine if the improvement is valid.
+
+## Original Prompt
+```
+{original_prompt}
+```
+
+## Improved Prompt
+```
+{improved_prompt}
+```
+
+## Stated Changes
+{changes_summary}
+
+## Validation Criteria
+1. **Preserved content**: The improved prompt must retain all key topics and tool references from the original. Nothing that was working should be removed.
+2. **Coherence**: The improved prompt must be a coherent system prompt, not random text or a partial fragment.
+3. **Relevance**: The changes should relate to the stated changes summary, not introduce unrelated content.
+4. **Tool references**: Tool names (lookup_company_policy, get_current_date) must still be referenced or the agent won't know to use them.
+
+Return JSON with exactly these fields:
+{{
+  "valid": true or false,
+  "reason": "one-sentence explanation"
+}}
+
+Return ONLY the JSON, no other text.
+"""
+
+
+def validate_improved_prompt(
+    original_prompt: str, improved_prompt: str, changes_summary: str
+) -> None:
+  """Use Gemini to validate that the improved prompt is a sensible revision."""
+  prompt = VALIDATION_PROMPT.format(
+      original_prompt=original_prompt,
+      improved_prompt=improved_prompt,
+      changes_summary=changes_summary,
+  )
+
+  model_id = os.getenv("DEMO_MODEL_ID", "gemini-2.5-flash")
+  client = genai.Client()
+  response = client.models.generate_content(
+      model=model_id,
+      contents=prompt,
+      config=GenerateContentConfig(
+          temperature=0.0,
+          response_mime_type="application/json",
+      ),
+  )
+
+  result = json.loads(response.text)
+  if not result.get("valid", False):
+    raise ValueError(
+        f"Prompt validation failed: {result.get('reason', 'unknown')}"
+    )
+  print(f"  Validation passed: {result.get('reason', 'ok')}")
+
+
+def load_quality_report(path: str) -> dict:
   """Load the JSON quality report."""
   with open(path) as f:
     return json.load(f)
 
 
-def load_current_prompt():
+def load_current_prompt() -> tuple[str, int]:
   """Read the current prompt from prompts.py."""
   with open(_PROMPTS_PATH) as f:
     content = f.read()
@@ -132,13 +192,13 @@ def load_current_prompt():
   return "", current_version
 
 
-def load_eval_cases():
+def load_eval_cases() -> dict:
   """Load current eval cases."""
   with open(_EVAL_CASES_PATH) as f:
     return json.load(f)
 
 
-def format_problem_sessions(report):
+def format_problem_sessions(report: dict) -> str:
   """Format unhelpful/partial sessions for the improver prompt."""
   lines = []
   for session in report.get("sessions", []):
@@ -166,7 +226,9 @@ def format_problem_sessions(report):
   return "\n".join(lines) if lines else "No problem sessions found."
 
 
-def call_improver(current_prompt, current_version, report):
+def call_improver(
+    current_prompt: str, current_version: int, report: dict
+) -> dict:
   """Call Gemini to generate improvements."""
   summary = report.get("summary", {})
   prompt = IMPROVER_PROMPT.format(
@@ -195,14 +257,19 @@ def call_improver(current_prompt, current_version, report):
   return json.loads(response.text)
 
 
-def write_improved_prompt(improved_prompt, changes_summary, current_version):
+def write_improved_prompt(
+    improved_prompt: str,
+    changes_summary: str,
+    current_version: int,
+    current_prompt: str,
+) -> int:
   """Append a new prompt version to prompts.py."""
   new_version = current_version + 1
 
   with open(_PROMPTS_PATH) as f:
     content = f.read()
 
-  # Validate the new prompt is reasonable
+  # Basic length sanity check
   if len(improved_prompt.strip()) < 50:
     raise ValueError("Improved prompt is too short, likely invalid")
 
@@ -244,19 +311,30 @@ def write_improved_prompt(improved_prompt, changes_summary, current_version):
   except SyntaxError as e:
     raise ValueError(f"Generated prompts.py has syntax error: {e}")
 
+  # LLM-based validation: verify the improved prompt preserves key content
+  # and is a coherent revision, not a hallucinated replacement.
+  validate_improved_prompt(current_prompt, improved_prompt, changes_summary)
+
   with open(_PROMPTS_PATH, "w") as f:
     f.write(content)
 
   return new_version
 
 
-def add_eval_cases(new_cases):
+_REQUIRED_CASE_KEYS = {"id", "question", "category", "expected_tool"}
+
+
+def add_eval_cases(new_cases: list[dict]) -> int:
   """Append new eval cases to eval_cases.json."""
   data = load_eval_cases()
   existing_ids = {c["id"] for c in data["eval_cases"]}
 
   added = 0
   for case in new_cases:
+    missing = _REQUIRED_CASE_KEYS - set(case.keys())
+    if missing:
+      print(f"  Skipping invalid eval case (missing {missing}): {case}")
+      continue
     if case["id"] not in existing_ids:
       data["eval_cases"].append(case)
       existing_ids.add(case["id"])
@@ -272,7 +350,7 @@ def add_eval_cases(new_cases):
   return added
 
 
-def main():
+def main() -> None:
   parser = argparse.ArgumentParser(
       description="Improve agent prompt based on quality report"
   )
@@ -305,6 +383,7 @@ def main():
           result["improved_prompt"],
           result["changes_summary"],
           current_version,
+          current_prompt,
       )
       break
     except ValueError as e:

@@ -49,7 +49,8 @@
 #       appended to eval/eval_cases.json so the same failures are caught
 #       in future cycles.
 #
-# The hero moment: run 3 cycles and watch quality climb from ~30% to ~90%+.
+# The hero moment: run 3 cycles and watch quality typically climb from ~30% to ~90%+
+# (results vary due to non-deterministic LLM output).
 #
 # Usage:
 #   ./run_cycle.sh              # Run one improvement cycle
@@ -177,17 +178,27 @@ for cycle in $(seq 1 "$CYCLES"); do
   echo ""
   echo "[Step 2/$TOTAL_STEPS] Evaluating session quality (BigQuery -> SDK quality_report.py)..."
   echo "  Reading logged sessions from BigQuery, scoring each with the SDK."
-  sleep 5  # Allow BigQuery writes to propagate
-
   REPORT_JSON="$REPORTS_DIR/quality_report_cycle_${cycle}.json"
-  python3 "$REPO_ROOT/scripts/quality_report.py" \
-    --app-name "$APP_NAME" \
-    --output-json "$REPORT_JSON" \
-    --limit 15 \
-    --time-period 24h || true
+
+  # Retry quality report with backoff — BigQuery writes may take a moment to propagate,
+  # especially on cold datasets or slow networks.
+  MAX_RETRIES=6
+  for attempt in $(seq 1 "$MAX_RETRIES"); do
+    sleep 5  # Wait for BigQuery propagation before each attempt
+    python3 "$REPO_ROOT/scripts/quality_report.py" \
+      --app-name "$APP_NAME" \
+      --output-json "$REPORT_JSON" \
+      --limit 15 \
+      --time-period 24h && break || true
+
+    if [[ $attempt -lt $MAX_RETRIES ]]; then
+      echo "  Quality report attempt $attempt/$MAX_RETRIES failed, retrying in 10s..."
+      sleep 10
+    fi
+  done
 
   if [[ ! -f "$REPORT_JSON" ]]; then
-    echo "ERROR: Quality report was not generated at $REPORT_JSON" >&2
+    echo "ERROR: Quality report was not generated after $MAX_RETRIES attempts" >&2
     exit 1
   fi
 
@@ -218,9 +229,16 @@ print(f\"  ({s.get('meaningful', '?')} meaningful, {s.get('partial', '?')} parti
   #      - improved_prompt: the full new prompt text
   #      - changes_summary: what changed and why
   #      - new_eval_cases: test questions for the issues it fixed
-  #   5. The script writes PROMPT_V{N+1} to agent/prompts.py and updates
+  #   5. Validates the improved prompt via a second Gemini call that
+  #      compares original vs improved, checking that key topics, tool
+  #      references, and coherence are preserved. If validation fails,
+  #      the improvement is retried (up to 3 attempts).
+  #   6. Validates new eval cases against a required schema (id, question,
+  #      category, expected_tool). Malformed cases are skipped with a
+  #      warning rather than written to disk.
+  #   7. The script writes PROMPT_V{N+1} to agent/prompts.py and updates
   #      CURRENT_PROMPT to point to it
-  #   6. New eval cases are appended to eval/eval_cases.json
+  #   8. Validated eval cases are appended to eval/eval_cases.json
   #
   # On the next cycle, the agent uses the improved prompt, and the new
   # eval cases verify the fixes hold.
