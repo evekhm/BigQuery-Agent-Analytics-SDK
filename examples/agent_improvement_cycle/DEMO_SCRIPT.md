@@ -21,6 +21,35 @@ Four steps, fully automated.
 
 ---
 
+## Setup (1 min)
+
+**Command:**
+```shell
+./setup.sh
+```
+
+Before running the demo, run the setup script. It performs five checks:
+
+1. **Python version:** Verifies Python 3.10+ is installed.
+2. **Google Cloud auth:** Confirms `gcloud` is authenticated and a
+   project is set.
+3. **APIs:** Enables BigQuery and Vertex AI APIs if not already active.
+4. **Dependencies:** Installs Python packages from `requirements.txt`.
+5. **Configuration:** Creates the `.env` file with your project ID,
+   BigQuery dataset, and table name. Creates the BQ dataset if it does
+   not exist.
+
+After setup completes, verify the `.env` file looks correct:
+
+```shell
+cat .env
+```
+
+You should see `PROJECT_ID`, `DATASET_ID`, `TABLE_ID`, and
+`GOOGLE_CLOUD_LOCATION` populated.
+
+---
+
 ## Show the V1 Prompt (30s)
 
 **Command:**
