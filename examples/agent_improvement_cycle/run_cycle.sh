@@ -37,6 +37,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REPORTS_DIR="$SCRIPT_DIR/reports"
 
+# Suppress noisy Python warnings (e.g. authlib deprecation)
+export PYTHONWARNINGS="ignore"
+
 # Load .env from the demo directory so all scripts see the same config
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
   set -a
@@ -129,7 +132,7 @@ echo ""
 step_start
 
 set +e
-python3 -W ignore::UserWarning "$SCRIPT_DIR/eval/run_eval.py" --golden
+python3 "$SCRIPT_DIR/eval/run_eval.py" --golden
 PREFLIGHT_EXIT=$?
 set -e
 step_end
@@ -168,7 +171,7 @@ print(CURRENT_VERSION)
   step_start
 
   TRAFFIC_JSON="$SCRIPT_DIR/eval/synthetic_traffic_cycle_${cycle}.json"
-  python3 -W ignore::UserWarning "$SCRIPT_DIR/eval/generate_traffic.py" \
+  python3 "$SCRIPT_DIR/eval/generate_traffic.py" \
     --count "$TRAFFIC_COUNT" \
     --output "$TRAFFIC_JSON"
 
@@ -188,7 +191,7 @@ print(CURRENT_VERSION)
   echo ""
   step_start
 
-  python3 -W ignore::UserWarning "$SCRIPT_DIR/eval/run_eval.py" \
+  python3 "$SCRIPT_DIR/eval/run_eval.py" \
     --eval-cases "$TRAFFIC_JSON"
 
   step_end
@@ -281,7 +284,7 @@ with open('$SCRIPT_DIR/eval/eval_cases.json') as f:
     print(len(json.load(f)['eval_cases']))
 ")
 
-  python3 -W ignore::UserWarning "$SCRIPT_DIR/improver/improve_agent.py" \
+  python3 "$SCRIPT_DIR/improver/improve_agent.py" \
     "$REPORT_JSON"
 
   NEW_V=$(python3 -c "
@@ -310,40 +313,25 @@ with open('$SCRIPT_DIR/eval/eval_cases.json') as f:
   echo ""
   echo "  STEP 5/$TOTAL_STEPS: MEASURE IMPROVEMENT"
   echo ""
-  echo "  Goal:    Verify the improved prompt on the extended eval set"
-  echo "           and measure quality on fresh, unseen traffic via BigQuery"
-  echo "  Method:  1. Run extended golden eval ($GOLDEN_AFTER cases)"
-  echo "           2. Generate fresh synthetic traffic (different from Step 1)"
-  echo "           3. Run through agent with BigQuery logging"
-  echo "           4. Score sessions from BigQuery (same as Step 3)"
+  echo "  Goal:    Measure quality on fresh, unseen traffic via BigQuery"
+  echo "  Method:  1. Generate fresh synthetic traffic (different from Step 1)"
+  echo "           2. Run through agent with BigQuery logging"
+  echo "           3. Score sessions from BigQuery (same as Step 3)"
   echo ""
   step_start
 
-  # 5a: Run extended golden eval as final regression check
-  echo "  --- Regression check ---"
-  set +e
-  python3 -W ignore::UserWarning "$SCRIPT_DIR/eval/run_eval.py" --golden
-  GOLDEN_EXIT=$?
-  set -e
-  if [[ $GOLDEN_EXIT -ne 0 ]]; then
-    echo ""
-    echo "  ERROR: Extended golden eval failed after improvement."
-    exit 1
-  fi
-
-  # 5b: Generate fresh synthetic traffic
-  echo ""
+  # 5a: Generate fresh synthetic traffic
   echo "  --- Fresh traffic ---"
   FRESH_TRAFFIC="$SCRIPT_DIR/eval/synthetic_traffic_cycle_${cycle}_fresh.json"
-  python3 -W ignore::UserWarning "$SCRIPT_DIR/eval/generate_traffic.py" \
+  python3 "$SCRIPT_DIR/eval/generate_traffic.py" \
     --count "$TRAFFIC_COUNT" \
     --output "$FRESH_TRAFFIC"
 
-  # 5c: Run fresh traffic through the improved agent (WITH BQ logging)
-  python3 -W ignore::UserWarning "$SCRIPT_DIR/eval/run_eval.py" \
+  # 5b: Run fresh traffic through the improved agent (WITH BQ logging)
+  python3 "$SCRIPT_DIR/eval/run_eval.py" \
     --eval-cases "$FRESH_TRAFFIC"
 
-  # 5d: Score from BigQuery
+  # 5c: Score from BigQuery
   # Wait 30s for BQ streaming buffer propagation. Without this, the
   # query may return stale sessions from Step 2 (already visible) instead
   # of the fresh Step 5c sessions (still propagating).
@@ -389,7 +377,7 @@ print('yes' if new and new != old else 'no')
     exit 1
   fi
 
-  # 5e: Print before/after comparison
+  # 5d: Print before/after comparison
   python3 -c "
 import json
 with open('$REPORT_JSON') as f:

@@ -110,25 +110,28 @@ async def run_all_cases(
       plugins=[bq_logging_plugin],
   )
 
-  results = []
-  for i, case in enumerate(cases, 1):
-    print(f"  [{i}/{len(cases)}] {case['id']}: {case['question']}")
+  async def _run_one(i: int, case: dict) -> dict:
     try:
       result = await run_single_case(runner, case)
       resp_text = result["response"].replace("\n", " ").strip()
+      print(f"  [{i}/{len(cases)}] {case['id']}: {case['question']}")
       print(f"           -> {resp_text}")
-      results.append(result)
+      return result
     except Exception as e:
+      print(f"  [{i}/{len(cases)}] {case['id']}: {case['question']}")
       print(f"           -> ERROR: {e}")
-      results.append(
-          {
-              "case_id": case["id"],
-              "question": case["question"],
-              "category": case.get("category", ""),
-              "response": f"ERROR: {e}",
-              "session_id": "",
-          }
-      )
+      return {
+          "case_id": case["id"],
+          "question": case["question"],
+          "category": case.get("category", ""),
+          "response": f"ERROR: {e}",
+          "session_id": "",
+      }
+
+  results = await asyncio.gather(
+      *[_run_one(i, case) for i, case in enumerate(cases, 1)]
+  )
+  results = list(results)
 
   print(f"\nCompleted {len(results)}/{len(cases)} cases.")
   print("Sessions logged to BigQuery via telemetry plugin.")
@@ -190,9 +193,7 @@ async def run_golden_eval(eval_cases_path: str | None = None) -> list[dict]:
   print(f"\n  Evaluating {len(cases)} cases with prompt V{CURRENT_VERSION}")
   print("  (LLM judge, no BigQuery logging)\n")
 
-  results = []
-  passed = 0
-  for i, case in enumerate(cases, 1):
+  async def _eval_one(i: int, case: dict) -> dict:
     result = await run_single_case(runner, case, user_id="golden_eval")
 
     judge_prompt = GOLDEN_JUDGE_PROMPT.format(
@@ -208,19 +209,21 @@ async def run_golden_eval(eval_cases_path: str | None = None) -> list[dict]:
         ),
     )
     verdict = json.loads(judge_response.text)
-    pass_fail = verdict.get("pass", False)
-    reason = verdict.get("reason", "")
+    result["pass"] = verdict.get("pass", False)
+    result["reason"] = verdict.get("reason", "")
 
-    if pass_fail:
-      passed += 1
-      print(f"  [{i}/{len(cases)}] PASS: {case['id']}")
-    else:
-      print(f"  [{i}/{len(cases)}] FAIL: {case['id']} - {reason}")
+    tag = "PASS" if result["pass"] else "FAIL"
+    suffix = "" if result["pass"] else f" - {result['reason']}"
+    print(f"  [{i}/{len(cases)}] {tag}: {case['id']}{suffix}")
+    return result
 
-    result["pass"] = pass_fail
-    result["reason"] = reason
-    results.append(result)
+  results = list(
+      await asyncio.gather(
+          *[_eval_one(i, case) for i, case in enumerate(cases, 1)]
+      )
+  )
 
+  passed = sum(1 for r in results if r.get("pass", False))
   total = len(cases)
   rate = round(100 * passed / total) if total else 0
   print(f"\n  Result: {passed}/{total} passed ({rate}%)")

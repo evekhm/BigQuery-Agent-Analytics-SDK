@@ -250,10 +250,8 @@ async def _judge_cases(
 
   model_id = os.getenv("DEMO_MODEL_ID", "gemini-2.5-flash")
   client = genai.Client()
-  passed = 0
-  results = []
 
-  for case in cases:
+  async def _judge_one(case: dict) -> dict:
     result = await run_single_case(runner, case, user_id="eval")
     judge_prompt = GOLDEN_JUDGE_PROMPT.format(
         question=case["question"],
@@ -268,15 +266,16 @@ async def _judge_cases(
         ),
     )
     verdict = json.loads(judge_response.text)
-    pass_fail = verdict.get("pass", False)
-    if pass_fail:
-      passed += 1
-      print(f"    PASS: {case['id']}")
-    else:
-      print(f"    FAIL: {case['id']} - {verdict.get('reason', '')}")
-    result["pass"] = pass_fail
+    result["pass"] = verdict.get("pass", False)
     result["reason"] = verdict.get("reason", "")
-    results.append(result)
+
+    tag = "PASS" if result["pass"] else "FAIL"
+    suffix = "" if result["pass"] else f" - {result['reason']}"
+    print(f"    {tag}: {case['id']}{suffix}")
+    return result
+
+  results = list(await asyncio.gather(*[_judge_one(c) for c in cases]))
+  passed = sum(1 for r in results if r.get("pass", False))
 
   return passed, len(cases), results
 
