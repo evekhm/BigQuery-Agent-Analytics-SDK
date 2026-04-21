@@ -206,8 +206,10 @@ degradation:
   actual behavioral testing.
   - **If golden cases fail**: The candidate prompt is rejected and
     Gemini generates a new one. This retries up to 3 times. If all
-    3 attempts fail the golden eval, the script exits with an error.
-    This means the prompt is never degraded -- the golden set is the
+    3 attempts fail the golden eval, the improvement step is skipped
+    (the prompt is not changed) and the cycle continues. Failed
+    synthetic cases are still extracted into the golden set. This
+    means the prompt is never degraded -- the golden set is the
     hard floor that every prompt version must clear.
 - **Eval case schema validation**: Extracted failure cases are checked
   for required fields (`id`, `question`, `category`, `expected_tool`).
@@ -329,9 +331,19 @@ To start over, reset everything to the initial state (V1 prompt,
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PROJECT_ID` | from `gcloud` | Google Cloud project ID (required) |
+| `PROJECT_ID` | from `gcloud` | Google Cloud project ID (env var or gcloud config) |
 | `DATASET_ID` | `agent_logs` | BigQuery dataset for session logs |
 | `DATASET_LOCATION` | `us-central1` | BigQuery dataset location |
 | `TABLE_ID` | `agent_events` | BigQuery table name |
 | `DEMO_MODEL_ID` | `gemini-2.5-flash` | Model for the demo agent |
 | `DEMO_AGENT_LOCATION` | `us-central1` | Vertex AI location |
+
+### Cost notes
+
+Each improvement cycle makes Gemini API calls for traffic generation,
+agent execution, quality evaluation, and prompt improvement. The golden
+eval gate also calls Gemini once per golden case per attempt (up to 3
+attempts per cycle). Since the golden set grows each cycle (failed
+synthetic cases are extracted into it), per-cycle cost increases over
+time. A typical single cycle uses ~50-80 Gemini calls; a 3-cycle run
+uses ~200-300.

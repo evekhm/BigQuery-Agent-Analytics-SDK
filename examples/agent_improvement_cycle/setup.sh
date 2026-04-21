@@ -56,9 +56,9 @@ if ! command -v gcloud &>/dev/null; then
   exit 1
 fi
 
-PROJECT_ID=$(gcloud config get-value project 2>/dev/null || true)
+PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || true)}"
 if [[ -z "$PROJECT_ID" ]]; then
-  echo "ERROR: No gcloud project set. Run: gcloud config set project YOUR_PROJECT_ID" >&2
+  echo "ERROR: No project set. Either export PROJECT_ID or run: gcloud config set project YOUR_PROJECT_ID" >&2
   exit 1
 fi
 echo "  Project: $PROJECT_ID"
@@ -91,13 +91,13 @@ echo ""
 echo "[5/5] Configuring environment..."
 
 DATASET_ID="${DATASET_ID:-agent_logs}"
-BQ_LOCATION="${BQ_LOCATION:-us-central1}"
+DATASET_LOCATION="${DATASET_LOCATION:-${BQ_LOCATION:-us-central1}}"
 TABLE_ID="${TABLE_ID:-agent_events}"
 
 # Create BigQuery dataset if it doesn't exist
 if ! bq show "${PROJECT_ID}:${DATASET_ID}" &>/dev/null 2>&1; then
-  echo "  Creating BigQuery dataset: ${DATASET_ID} in ${BQ_LOCATION}..."
-  bq mk --dataset --location="$BQ_LOCATION" "${PROJECT_ID}:${DATASET_ID}" 2>/dev/null || true
+  echo "  Creating BigQuery dataset: ${DATASET_ID} in ${DATASET_LOCATION}..."
+  bq mk --dataset --location="$DATASET_LOCATION" "${PROJECT_ID}:${DATASET_ID}" 2>/dev/null || true
 fi
 
 # Write .env file (don't overwrite if it exists)
@@ -106,7 +106,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
 # Agent Improvement Cycle Demo Configuration
 PROJECT_ID=$PROJECT_ID
 DATASET_ID=$DATASET_ID
-DATASET_LOCATION=$BQ_LOCATION
+DATASET_LOCATION=$DATASET_LOCATION
 TABLE_ID=$TABLE_ID
 DEMO_MODEL_ID=gemini-2.5-flash
 DEMO_AGENT_LOCATION=us-central1

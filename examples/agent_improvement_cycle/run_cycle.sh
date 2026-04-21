@@ -209,6 +209,7 @@ print(CURRENT_VERSION)
   step_start
 
   REPORT_JSON="$REPORTS_DIR/quality_report_cycle_${cycle}.json"
+  rm -f "$REPORT_JSON"
 
   # Retry with backoff for BigQuery write propagation
   MAX_RETRIES=6
@@ -320,6 +321,7 @@ with open('$SCRIPT_DIR/eval/eval_cases.json') as f:
   step_start
 
   FRESH_TRAFFIC="$SCRIPT_DIR/eval/synthetic_traffic_cycle_${cycle}_fresh.json"
+  rm -f "$SCRIPT_DIR/reports/latest_eval_results.json"
   python3 -W ignore::UserWarning "$SCRIPT_DIR/eval/generate_traffic.py" \
     --count "$TRAFFIC_COUNT" \
     --output "$FRESH_TRAFFIC"

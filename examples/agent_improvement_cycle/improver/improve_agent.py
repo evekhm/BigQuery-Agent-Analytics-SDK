@@ -456,11 +456,20 @@ def main() -> None:
   print(f"  Current prompt version: v{current_version}")
   print(f"  Quality score: {report['summary']['meaningful_rate']}% meaningful")
 
+  if report["summary"].get("total_sessions", 0) == 0:
+    print(
+        "  ERROR: Quality report has 0 sessions. Cannot improve without data."
+    )
+    sys.exit(1)
+
   if report["summary"]["meaningful_rate"] >= 95:
     print("  Quality is already high (>=95%). No improvement needed.")
     return
 
   # Generate improved prompt, validated by golden eval (retry up to 3 times)
+  new_version = None
+  best_passed = -1
+
   for attempt in range(3):
     print(
         f"  Calling Gemini to generate improvements (attempt"
@@ -471,8 +480,6 @@ def main() -> None:
 
     if len(candidate.strip()) < 50:
       print("  Warning: candidate prompt too short, retrying...")
-      if attempt == 2:
-        raise ValueError("All attempts produced invalid prompts")
       continue
 
     # Golden eval gate: run all golden cases against the candidate
@@ -481,11 +488,13 @@ def main() -> None:
     passed_all, passed, total = asyncio.run(run_golden_eval(candidate))
     print(f"  Golden eval: {passed}/{total} passed.")
 
+    if passed > best_passed:
+      best_passed = passed
+
     if not passed_all:
       print("  Golden eval FAILED: candidate breaks existing cases.")
-      if attempt == 2:
-        raise ValueError("Golden eval failed after 3 attempts")
-      print("  Retrying with a new candidate...")
+      if attempt < 2:
+        print("  Retrying with a new candidate...")
       continue
 
     print("  Golden eval PASSED: no regressions.")
@@ -500,9 +509,24 @@ def main() -> None:
       break
     except ValueError as e:
       print(f"  Warning: {e}")
-      if attempt == 2:
-        raise
-      print("  Retrying...")
+      if attempt < 2:
+        print("  Retrying...")
+
+  if new_version is None:
+    print(
+        f"  WARNING: All candidates failed golden eval (best:"
+        f" {best_passed}/{total}). Skipping improvement to avoid"
+        " regressions."
+    )
+    # Still extract failed cases to grow the golden set
+    failed_cases = extract_failed_cases(report)
+    if failed_cases:
+      added = add_eval_cases(failed_cases)
+      print(
+          f"  Extracted {len(failed_cases)} failed cases, added {added}"
+          " new to golden eval set."
+      )
+    return
 
   print(f"  Written PROMPT_V{new_version} to prompts.py")
   print(f"  Changes: {result['changes_summary']}")
