@@ -226,11 +226,21 @@ def _check_binding_names_resolve(
           f"Entity binding {eb.name!r} does not name a declared entity "
           f"in ontology {binding.ontology!r}."
       )
+    if entity_map[eb.name].abstract:
+      raise ValueError(
+          f"Entity binding {eb.name!r} targets an abstract entity, "
+          f"which cannot be bound to a physical table."
+      )
   for rb in binding.relationships:
     if rb.name not in rel_map:
       raise ValueError(
           f"Relationship binding {rb.name!r} does not name a declared "
           f"relationship in ontology {binding.ontology!r}."
+      )
+    if rel_map[rb.name].abstract:
+      raise ValueError(
+          f"Relationship binding {rb.name!r} targets an abstract "
+          f"relationship, which cannot be bound to a physical table."
       )
 
 

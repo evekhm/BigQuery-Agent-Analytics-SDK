@@ -165,9 +165,9 @@ values, interpreted as "the intersection of these."
   when a label is also present.
 - `skos:altLabel` and additional `rdfs:label`s in other languages →
   `synonyms`.
-- Custom annotation properties outside our recognized set → collected as
-  `annotations: { <iri>: <value> }` when the value is a literal; dropped
-  silently when not.
+- Custom annotation properties outside the recognized set (RDF, RDFS,
+  OWL, SKOS) → collected as `annotations: { <local_name>: <value> }`
+  when the value is a literal. Non-literal values are dropped.
 
 ## 10. Primary keys
 
@@ -489,3 +489,65 @@ Notes on this output:
 - Alphabetical ordering: `Account`, `Organization`, `Party`, `Person`.
 - This output uses `extends`, so the v0 compiler will reject it; that
   is expected for a faithful import.
+
+## 17. SKOS support
+
+The importer recognizes SKOS constructs alongside OWL. SKOS is
+informational by default: SKOS predicates never flow into structural
+fields (`extends`, `description`). Instead, they produce abstract
+entities, abstract relationships, and annotations.
+
+### 17.1 Abstract elements
+
+An element with `abstract: true` is declared in the ontology but not
+bound to a BigQuery table. Primary keys are not required on abstract
+entities. `gm validate` does not demand them; `gm scaffold` skips them;
+the compiler rejects bindings that target them.
+
+### 17.2 Naming convention
+
+- **Pure SKOS entity** (typed only as `skos:Concept`): name prefixed
+  `skos_` (e.g., `skos_Banking`).
+- **Mixed OWL+SKOS entity** (typed as both `owl:Class` and
+  `skos:Concept`): name unprefixed. OWL provides structure, so it wins
+  the name.
+- **SKOS relationship** (always abstract): name prefixed `skos_` (e.g.,
+  `skos_broader`, `skos_related`, `skos_exactMatch`).
+- **SKOS annotation keys**: use `skos:` colon prefix (e.g.,
+  `skos:definition`, `skos:notation`), matching the `owl:` convention.
+
+### 17.3 SKOS mapping table
+
+| SKOS construct | Ontology equivalent | Notes |
+|---|---|---|
+| `skos:Concept` (no `owl:Class`) | Abstract entity with `skos_` prefix | Keys not required |
+| `owl:Class` + `skos:Concept` | Concrete entity, unprefixed | OWL provides structure |
+| `skos:prefLabel` | `synonyms` (when different from name) | Label data |
+| `skos:altLabel`, `skos:hiddenLabel` | `synonyms` | Label data |
+| `skos:definition` | Annotation `skos:definition` | Not promoted to description |
+| `skos:broader`, `skos:narrower` | Abstract relationship `skos_broader` (narrower normalized) | |
+| `skos:related` | Abstract relationship `skos_related` | |
+| `skos:exactMatch` etc. | Abstract relationship if target imported; annotation if external IRI | |
+| `skos:notation`, `skos:scopeNote`, etc. | Annotation with `skos:` prefix | |
+| `skos:inScheme`, `skos:topConceptOf` | Annotation with `skos:` prefix | |
+
+### 17.4 Relationship uniqueness
+
+Abstract relationships use relaxed uniqueness: `(name, from, to)` must
+be unique, rather than `(name)` alone. This allows multiple
+`skos_broader` edges with different endpoints without synthetic naming.
+Concrete relationships retain strict `(name)` uniqueness.
+
+### 17.5 Language selection (`--language`)
+
+The `--language` flag (default `en`) selects labels by BCP-47 tag:
+
+- Labels matching the selected language populate names and synonyms.
+- Labels in non-selected languages become language-suffixed annotations
+  (e.g., `skos:prefLabel@fr: Banque`).
+
+### 17.6 Generic literal annotations
+
+Unknown literal-valued predicates (not RDF, RDFS, OWL, or SKOS) are
+preserved as `annotations: { <local_name>: <value> }`. This covers
+Dublin Core and custom annotation properties without special handling.

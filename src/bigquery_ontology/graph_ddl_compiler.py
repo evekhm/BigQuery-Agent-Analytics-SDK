@@ -106,6 +106,19 @@ def _resolve(ontology: Ontology, binding: Binding) -> ResolvedGraph:
       eb.name: eb for eb in binding.entities
   }
 
+  # Defense-in-depth: abstract elements must never reach the compiler
+  # (the binding loader rejects them).
+  for eb in binding.entities:
+    if entity_map[eb.name].abstract:
+      raise ValueError(
+          f"Internal error: abstract entity {eb.name!r} in binding."
+      )
+  for rb in binding.relationships:
+    if rel_map[rb.name].abstract:
+      raise ValueError(
+          f"Internal error: abstract relationship {rb.name!r} in binding."
+      )
+
   # Build node tables first. Edge tables reference node tables by
   # alias/key-columns, so node tables have to exist before we can
   # resolve edges.
