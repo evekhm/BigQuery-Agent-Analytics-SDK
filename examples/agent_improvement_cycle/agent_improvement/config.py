@@ -21,7 +21,6 @@ from typing import Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
   from agent_improvement.prompt_adapter import PromptAdapter
-  from agent_improvement.traffic_generator import TrafficGenerator
   from google.adk.agents import Agent
 
 
@@ -40,8 +39,6 @@ class ImprovementConfig:
       prompt_adapter: Reads and writes the agent's prompt storage
           (e.g. a ``prompts.py`` file).
       eval_cases_path: Path to the golden eval set JSON file.
-      traffic_generator: Optional traffic generator for full-cycle mode.
-          If *None*, only golden-eval improvement is run.
       model_id: Gemini model used by the improver and judge LLMs.
       max_attempts: Maximum number of candidate prompts to try before
           giving up.
@@ -57,7 +54,6 @@ class ImprovementConfig:
   agent_tools: list[Callable]
   prompt_adapter: PromptAdapter
   eval_cases_path: str
-  traffic_generator: TrafficGenerator | None = None
   model_id: str = "gemini-2.5-flash"
   max_attempts: int = 3
   quality_threshold: float = 1.0

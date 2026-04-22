@@ -72,7 +72,6 @@ agent_improvement/   # Reusable improvement module (works with any ADK agent)
   eval_runner.py     # Run eval cases + LLM judge
   prompt_adapter.py  # ABC + PythonFilePromptAdapter
   tool_introspection.py # Auto-extract tool signatures from agent tools
-  traffic_generator.py  # ABC + GenericTrafficGenerator
   prompts.py         # Default judge/improver prompt templates
 
 run_improvement.py   # Entry point: wires company_info_agent config

@@ -26,15 +26,11 @@ from agent_improvement.improver_agent import run_improvement
 from agent_improvement.prompt_adapter import PromptAdapter
 from agent_improvement.prompt_adapter import PythonFilePromptAdapter
 from agent_improvement.tool_introspection import extract_tool_signatures
-from agent_improvement.traffic_generator import GenericTrafficGenerator
-from agent_improvement.traffic_generator import TrafficGenerator
 
 __all__ = [
     "ImprovementConfig",
     "PromptAdapter",
     "PythonFilePromptAdapter",
-    "TrafficGenerator",
-    "GenericTrafficGenerator",
     "EvalRunner",
     "extract_tool_signatures",
     "create_improver_agent",
