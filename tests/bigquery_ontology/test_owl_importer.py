@@ -1245,6 +1245,52 @@ class TestOwlRefToSkosConcept:
     data = yaml.safe_load(yaml_text)
     rel = next(r for r in data["relationships"] if r["name"] == "belongsTo")
     assert rel["to"] == "skos_Category"
+    # Endpoint is abstract → relationship must be marked abstract too,
+    # or the loader rejects the ontology.
+    assert rel.get("abstract") is True
+
+    # Verify the emitted YAML actually round-trips through the loader.
+    from bigquery_ontology import load_ontology_from_string
+
+    load_ontology_from_string(yaml_text)
+
+  def test_owl_subclassof_skos_concept_extends_resolves(self, tmp_path):
+    """An OWL class whose rdfs:subClassOf target is a pure SKOS concept
+    must emit ``extends: skos_<name>`` so the YAML loads."""
+    ttl = tmp_path / "subclass.ttl"
+    ttl.write_text(
+        textwrap.dedent(
+            """\
+      @prefix : <http://example.com/test#> .
+      @prefix owl: <http://www.w3.org/2002/07/owl#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+      @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+      :Category a skos:Concept ;
+          skos:prefLabel "Category"@en .
+
+      :Account a owl:Class ;
+          rdfs:subClassOf :Category ;
+          owl:hasKey ( :account_id ) .
+      :account_id a owl:DatatypeProperty ;
+          rdfs:domain :Account ;
+          rdfs:range xsd:string .
+    """
+        )
+    )
+    yaml_text, _ = import_owl(
+        [ttl],
+        include_namespaces=["http://example.com/test#"],
+    )
+    data = yaml.safe_load(yaml_text)
+    account = next(e for e in data["entities"] if e["name"] == "Account")
+    assert account["extends"] == "skos_Category"
+
+    # Round-trip through loader — proves the extends target resolves.
+    from bigquery_ontology import load_ontology_from_string
+
+    load_ontology_from_string(yaml_text)
 
 
 class TestAbstractKeyShapeValidation:
@@ -1350,3 +1396,170 @@ class TestRoundTrip:
     abstract_entities = [e for e in ont.entities if e.abstract]
     assert len(concrete_entities) >= 2  # Account, Ledger
     assert len(abstract_entities) >= 1  # skos_FinancialProduct
+
+  def test_concrete_entity_no_abstract_key_emitted(self, tmp_path):
+    """Concrete entities must not emit ``abstract: false`` (default is
+    False; emitting the default bloats every real-world ontology file)."""
+    ttl = tmp_path / "simple.ttl"
+    ttl.write_text(
+        textwrap.dedent(
+            """\
+      @prefix : <http://example.com/t#> .
+      @prefix owl: <http://www.w3.org/2002/07/owl#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+      :A a owl:Class ; owl:hasKey ( :a_id ) .
+      :a_id a owl:DatatypeProperty ;
+          rdfs:domain :A ; rdfs:range xsd:string .
+    """
+        )
+    )
+    yaml_text, _ = import_owl(
+        [ttl], include_namespaces=["http://example.com/t#"]
+    )
+    assert "abstract: false" not in yaml_text
+
+  def test_omitted_abstract_key_loads_as_false(self):
+    """YAML that omits ``abstract`` must parse back to ``abstract=False``,
+    so the emitter's suppression of the default is safe."""
+    from bigquery_ontology import load_ontology_from_string
+
+    ont = load_ontology_from_string(
+        textwrap.dedent(
+            """\
+      ontology: t
+      entities:
+        - name: A
+          keys: {primary: [id]}
+          properties:
+            - {name: id, type: string}
+      relationships:
+        - name: rel
+          from: A
+          to: A
+    """
+        )
+    )
+    assert ont.entities[0].abstract is False
+    assert ont.relationships[0].abstract is False
+
+
+class TestSkosSchemeAnnotationPreservation:
+  """``skos:inScheme`` / ``skos:topConceptOf`` must preserve full IRIs."""
+
+  def test_in_scheme_preserves_full_iri(self, tmp_path):
+    ttl = tmp_path / "schemes.ttl"
+    ttl.write_text(
+        textwrap.dedent(
+            """\
+      @prefix : <http://example.com/tax#> .
+      @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+      :c1 a skos:Concept ;
+          skos:inScheme <http://ns1.example/Scheme> ,
+                        <http://ns2.example/Scheme> ;
+          skos:prefLabel "C1"@en .
+    """
+        )
+    )
+    yaml_text, _ = import_owl(
+        [ttl], include_namespaces=["http://example.com/tax#"]
+    )
+    data = yaml.safe_load(yaml_text)
+    concept = next(e for e in data["entities"] if e["name"] == "skos_c1")
+    schemes = concept["annotations"]["skos:inScheme"]
+    # Both full IRIs preserved, not collapsed to the shared local name.
+    assert "http://ns1.example/Scheme" in schemes
+    assert "http://ns2.example/Scheme" in schemes
+
+  def test_top_concept_of_preserves_full_iri(self, tmp_path):
+    ttl = tmp_path / "top.ttl"
+    ttl.write_text(
+        textwrap.dedent(
+            """\
+      @prefix : <http://example.com/tax#> .
+      @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+      :c1 a skos:Concept ;
+          skos:topConceptOf <http://ns1.example/Scheme> ;
+          skos:prefLabel "C1"@en .
+    """
+        )
+    )
+    yaml_text, _ = import_owl(
+        [ttl], include_namespaces=["http://example.com/tax#"]
+    )
+    data = yaml.safe_load(yaml_text)
+    concept = next(e for e in data["entities"] if e["name"] == "skos_c1")
+    assert (
+        concept["annotations"]["skos:topConceptOf"]
+        == "http://ns1.example/Scheme"
+    )
+
+
+class TestMultiLabelNonSelectedLanguage:
+  """Multiple labels in the same non-selected (predicate, language)
+  must be preserved — not silently overwritten."""
+
+  def test_two_french_alt_labels_both_preserved(self, tmp_path):
+    ttl = tmp_path / "multi.ttl"
+    ttl.write_text(
+        textwrap.dedent(
+            """\
+      @prefix : <http://example.com/tax#> .
+      @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+      :c1 a skos:Concept ;
+          skos:prefLabel "C1"@en ;
+          skos:altLabel "alpha-fr"@fr , "beta-fr"@fr ;
+          skos:hiddenLabel "hidden-fr"@fr .
+    """
+        )
+    )
+    yaml_text, _ = import_owl(
+        [ttl], include_namespaces=["http://example.com/tax#"]
+    )
+    data = yaml.safe_load(yaml_text)
+    anns = next(e for e in data["entities"] if e["name"] == "skos_c1")[
+        "annotations"
+    ]
+    # Both French altLabels survive as a list, not collapsed to one.
+    assert sorted(anns["skos:altLabel@fr"]) == ["alpha-fr", "beta-fr"]
+    assert anns["skos:hiddenLabel@fr"] == "hidden-fr"
+
+
+class TestGenericAnnotationNamespacePrefix:
+  """Generic literal-annotation keys must retain their namespace prefix
+  so vocabularies with colliding local names don't merge."""
+
+  def test_dc_and_dcterms_title_do_not_collide(self, tmp_path):
+    ttl = tmp_path / "dc.ttl"
+    ttl.write_text(
+        textwrap.dedent(
+            """\
+      @prefix : <http://example.com/t#> .
+      @prefix owl: <http://www.w3.org/2002/07/owl#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+      @prefix dc: <http://purl.org/dc/elements/1.1/> .
+      @prefix dcterms: <http://purl.org/dc/terms/> .
+
+      :A a owl:Class ;
+          owl:hasKey ( :a_id ) ;
+          dc:title "DC Title" ;
+          dcterms:title "DCterms Title" .
+      :a_id a owl:DatatypeProperty ;
+          rdfs:domain :A ; rdfs:range xsd:string .
+    """
+        )
+    )
+    yaml_text, _ = import_owl(
+        [ttl], include_namespaces=["http://example.com/t#"]
+    )
+    data = yaml.safe_load(yaml_text)
+    anns = next(e for e in data["entities"] if e["name"] == "A")["annotations"]
+    # Keys retain their prefix and don't collapse to a single "title".
+    assert anns.get("dc:title") == "DC Title"
+    assert anns.get("dcterms:title") == "DCterms Title"
+    assert "title" not in anns

@@ -107,6 +107,21 @@ def _in_namespace(iri: URIRef, namespaces: list[str]) -> bool:
   return any(s.startswith(ns) for ns in namespaces)
 
 
+def _qname_or_iri(g: "Graph", iri: URIRef) -> str:
+  """Return ``prefix:local`` for a predicate whose namespace has a
+  bound prefix; otherwise return the full IRI.
+
+  Bare local names collide across vocabularies (``dc:title`` and
+  ``dcterms:title`` both have local ``title``), so the annotation key
+  must retain enough of the IRI to disambiguate.
+  """
+  try:
+    prefix, _, local = g.namespace_manager.compute_qname(iri, generate=False)
+    return f"{prefix}:{local}"
+  except (KeyError, ValueError):
+    return str(iri)
+
+
 # ---------------------------------------------------------------------------
 # Intermediate dataclasses
 # ---------------------------------------------------------------------------
@@ -178,21 +193,47 @@ class _DropSummary:
 # ---------------------------------------------------------------------------
 
 
+def _count_lang_labels(lang_anns: dict[str, AnnotationValue]) -> int:
+  """Total number of label values (across keys and list entries)."""
+  total = 0
+  for v in lang_anns.values():
+    total += len(v) if isinstance(v, list) else 1
+  return total
+
+
+def _collapse_lang_anns(
+    lang_anns: dict[str, list[str]],
+) -> dict[str, AnnotationValue]:
+  """Collapse a multi-valued language-annotation map to annotation form.
+
+  Values are sorted and deduplicated; a single value becomes a scalar,
+  multiple values become a sorted list. Non-selected-language labels
+  can legitimately repeat per ``(predicate, language)`` (e.g. two French
+  ``skos:altLabel``s), so the intermediate representation is list-valued
+  to prevent silent overwrites.
+  """
+  out: dict[str, AnnotationValue] = {}
+  for key, vals in lang_anns.items():
+    uniq = sorted(set(vals))
+    out[key] = uniq[0] if len(uniq) == 1 else uniq
+  return out
+
+
 def _pick_primary_label(
     labels,
     language: str = "en",
-) -> tuple[str | None, list[str], dict[str, str]]:
+) -> tuple[str | None, list[str], dict[str, list[str]]]:
   """Pick the best label as description, return rest as synonyms.
 
   Prefers labels matching ``language``, then falls back to untagged or
   other languages. Within the preferred group, picks alphabetically
   first for determinism. Returns ``(primary, synonyms, lang_annotations)``
-  where ``lang_annotations`` maps ``predicate@lang`` keys to values for
-  labels in non-selected languages.
+  where ``lang_annotations`` maps ``@lang`` keys to the list of label
+  values seen in that non-selected language.
   """
   selected: list[str] = []
   untagged: list[str] = []
-  other_lang: dict[str, str] = {}
+  other_lang: dict[str, list[str]] = {}
   for label in labels:
     lang = getattr(label, "language", None)
     if lang is not None and lang.startswith(language):
@@ -200,7 +241,7 @@ def _pick_primary_label(
     elif lang is None or lang == "":
       untagged.append(str(label))
     else:
-      other_lang[f"@{lang}"] = str(label)
+      other_lang.setdefault(f"@{lang}", []).append(str(label))
 
   selected.sort()
   untagged.sort()
@@ -215,17 +256,18 @@ def _extract_labels_and_description(
     g: Graph,
     iri: URIRef,
     language: str = "en",
-) -> tuple[str | None, list[str], dict[str, str]]:
+) -> tuple[str | None, list[str], dict[str, AnnotationValue]]:
   """Extract rdfs:label → description, SKOS labels → synonyms.
 
   Returns ``(description, synonyms, lang_annotations)`` where
-  ``lang_annotations`` maps keys like ``rdfs:label@fr`` to values for
-  labels in non-selected languages.
+  ``lang_annotations`` maps keys like ``rdfs:label@fr`` to a scalar
+  value (single label) or a sorted list (multiple labels in the same
+  predicate+language combination).
   """
   raw_labels = list(g.objects(iri, RDFS.label))
   description, synonyms, lang_anns = _pick_primary_label(raw_labels, language)
-  label_lang_anns: dict[str, str] = {
-      f"rdfs:label{k}": v for k, v in lang_anns.items()
+  label_lang_anns: dict[str, list[str]] = {
+      f"rdfs:label{k}": list(v) for k, v in lang_anns.items()
   }
 
   comments: list[str] = []
@@ -240,29 +282,35 @@ def _extract_labels_and_description(
   for alt in g.objects(iri, SKOS.altLabel):
     lang = getattr(alt, "language", None)
     if lang is not None and not lang.startswith(language) and lang != "":
-      label_lang_anns[f"skos:altLabel@{lang}"] = str(alt)
+      label_lang_anns.setdefault(f"skos:altLabel@{lang}", []).append(str(alt))
     else:
       synonyms.append(str(alt))
   for pref in g.objects(iri, SKOS.prefLabel):
     lang = getattr(pref, "language", None)
     val = str(pref)
     if lang is not None and not lang.startswith(language) and lang != "":
-      label_lang_anns[f"skos:prefLabel@{lang}"] = val
+      label_lang_anns.setdefault(f"skos:prefLabel@{lang}", []).append(val)
     elif val not in synonyms and val != description:
       synonyms.append(val)
   for hidden in g.objects(iri, SKOS.hiddenLabel):
     lang = getattr(hidden, "language", None)
     if lang is not None and not lang.startswith(language) and lang != "":
-      label_lang_anns[f"skos:hiddenLabel@{lang}"] = str(hidden)
+      label_lang_anns.setdefault(f"skos:hiddenLabel@{lang}", []).append(
+          str(hidden)
+      )
     else:
       synonyms.append(str(hidden))
 
   synonyms.sort()
-  return description, synonyms, label_lang_anns
+  return description, synonyms, _collapse_lang_anns(label_lang_anns)
 
 
 def _extract_parents(
-    g: Graph, iri: URIRef, predicate: URIRef, namespaces: list[str]
+    g: Graph,
+    iri: URIRef,
+    predicate: URIRef,
+    namespaces: list[str],
+    iri_to_name: dict[str, str] | None = None,
 ) -> tuple[str | None, bool, list[str], dict[str, AnnotationValue]]:
   parents: list[str] = []
   excluded: list[str] = []
@@ -274,7 +322,13 @@ def _extract_parents(
     if parent == OWL.Thing or parent == RDFS.Resource:
       continue
     if _in_namespace(parent, namespaces):
-      parents.append(_local_name(parent))
+      # Resolve through iri_to_name so cross-kind parents (e.g. an
+      # owl:Class whose subClassOf target is a pure SKOS concept
+      # renamed to ``skos_<name>``) emit the correct name.
+      if iri_to_name is not None and str(parent) in iri_to_name:
+        parents.append(iri_to_name[str(parent)])
+      else:
+        parents.append(_local_name(parent))
     else:
       excluded.append(str(parent))
 
@@ -382,11 +436,36 @@ def _collect_drop_annotations(
       )
 
 
+def _precompute_iri_to_name(g: Graph, namespaces: list[str]) -> dict[str, str]:
+  """Build an IRI→future-entity-name map for every in-namespace OWL class
+  and SKOS concept.
+
+  Pre-computed *before* extraction so passes that resolve references
+  (rdfs:subClassOf, rdfs:subPropertyOf, rdfs:domain, rdfs:range) can
+  emit the same name the concept will ultimately carry — including the
+  ``skos_`` prefix applied to SKOS-only concepts. Without this, an OWL
+  class that extends a pure SKOS concept would emit ``extends:
+  Category`` while the concept itself is imported as ``skos_Category``.
+  """
+  mapping: dict[str, str] = {}
+  for cls in g.subjects(RDF.type, OWL.Class):
+    if isinstance(cls, URIRef) and _in_namespace(cls, namespaces):
+      mapping[str(cls)] = _local_name(cls)
+  for concept in g.subjects(RDF.type, SKOS.Concept):
+    if isinstance(concept, URIRef) and _in_namespace(concept, namespaces):
+      iri_str = str(concept)
+      if iri_str in mapping:
+        continue
+      mapping[iri_str] = f"skos_{_local_name(concept)}"
+  return mapping
+
+
 def _extract_entities(
     g: Graph,
     namespaces: list[str],
     drops: _DropSummary,
     language: str = "en",
+    iri_to_name: dict[str, str] | None = None,
 ) -> dict[str, _ImportedEntity]:
   entities: dict[str, _ImportedEntity] = {}
 
@@ -412,9 +491,11 @@ def _extract_entities(
         cls,
         language,
     )
-    drops.skos_labels_discarded_by_language += len(lang_anns)
+    drops.skos_labels_discarded_by_language += _count_lang_labels(lang_anns)
     extends, extends_fill_in, extends_candidates, parent_anns = (
-        _extract_parents(g, cls, RDFS.subClassOf, namespaces)
+        _extract_parents(
+            g, cls, RDFS.subClassOf, namespaces, iri_to_name=iri_to_name
+        )
     )
     keys_primary, keys_fill_in, key_candidates, keys_excluded = _extract_keys(
         g, cls, namespaces
@@ -549,7 +630,7 @@ def _extract_relationships(
         prop,
         language,
     )
-    drops.skos_labels_discarded_by_language += len(lang_anns)
+    drops.skos_labels_discarded_by_language += _count_lang_labels(lang_anns)
 
     domains: list[str] = []
     domain_excluded: list[str] = []
@@ -613,7 +694,9 @@ def _extract_relationships(
     _collect_drop_annotations(g, prop, annotations, comments, drops)
 
     extends, extends_fill_in, extends_candidates, parent_anns = (
-        _extract_parents(g, prop, RDFS.subPropertyOf, namespaces)
+        _extract_parents(
+            g, prop, RDFS.subPropertyOf, namespaces, iri_to_name=iri_to_name
+        )
     )
     annotations.update(parent_anns)
 
@@ -739,7 +822,11 @@ def _extract_skos_annotations(
   for pred, ann_key in _skos_ref_ann_preds().items():
     values = []
     for obj in g.objects(iri, pred):
-      values.append(_local_name(obj) if isinstance(obj, URIRef) else str(obj))
+      # Preserve the full IRI — collapsing to local name loses identity
+      # when two schemes share a local name (e.g. ``ns1/Scheme`` vs.
+      # ``ns2/Scheme``) and defeats downstream consumers that look up
+      # scheme membership by IRI.
+      values.append(str(obj))
     if values:
       values.sort()
       annotations[ann_key] = values if len(values) > 1 else values[0]
@@ -798,7 +885,7 @@ def _extract_skos_concepts(
         concept,
         language,
     )
-    drops.skos_labels_discarded_by_language += len(lang_anns)
+    drops.skos_labels_discarded_by_language += _count_lang_labels(lang_anns)
 
     annotations: dict[str, AnnotationValue] = {}
     annotations.update(lang_anns)
@@ -956,7 +1043,11 @@ def _extract_generic_annotations(
       pred_str = str(pred)
       if any(pred_str.startswith(pfx) for pfx in _HANDLED_PREFIXES):
         continue
-      ann_key = _local_name(pred)
+      # Build a ``prefix:local`` key so callers can disambiguate
+      # vocabularies with colliding local names (e.g. ``dc:title`` vs.
+      # ``dcterms:title``). Fall back to the full IRI when no prefix is
+      # bound for the predicate's namespace.
+      ann_key = _qname_or_iri(g, pred)
       collected.setdefault(ann_key, []).append(str(obj))
 
     for ann_key, values in collected.items():
@@ -1279,12 +1370,20 @@ def import_owl(
 
   drops = _DropSummary()
 
-  # Stage 1: OWL entity extraction.
-  entities = _extract_entities(g, include_namespaces, drops, language)
+  # Pre-compute IRI→future-entity-name for every in-namespace OWL class
+  # and SKOS concept. Passes that resolve references (subClassOf,
+  # subPropertyOf, domain, range) use this to emit the correct name
+  # even when the target is a SKOS-only concept that will be renamed
+  # to ``skos_<name>``.
+  iri_to_name: dict[str, str] = _precompute_iri_to_name(g, include_namespaces)
 
-  # Stage 2: SKOS concept extraction — runs BEFORE datatype properties
-  # and OWL relationships so that endpoints referring to SKOS-only
-  # concepts resolve to the correct ``skos_<name>`` entity name.
+  # Stage 1: OWL entity extraction (extends is resolved through iri_to_name).
+  entities = _extract_entities(
+      g, include_namespaces, drops, language, iri_to_name=iri_to_name
+  )
+
+  # Stage 2: SKOS concept extraction — adds abstract entities for
+  # SKOS-only concepts and enriches existing OWL+SKOS entities.
   concept_iri_to_name = _extract_skos_concepts(
       g,
       entities,
@@ -1293,11 +1392,11 @@ def import_owl(
       language,
   )
 
-  # Build a full IRI→entity-name map (OWL + SKOS) for endpoint resolution.
-  iri_to_name: dict[str, str] = dict(concept_iri_to_name)
-  for entity in entities.values():
-    iri_str = str(entity.iri)
-    iri_to_name.setdefault(iri_str, entity.name)
+  # Reconcile: SKOS concepts may have been promoted to abstract entities
+  # under ``skos_<name>``. Fold their IRIs into iri_to_name so the later
+  # passes use the same names.
+  for iri_str, name in concept_iri_to_name.items():
+    iri_to_name[iri_str] = name
 
   # Stage 3: OWL datatype properties and object properties, with SKOS
   # concepts already visible to endpoint resolution.
@@ -1335,6 +1434,21 @@ def import_owl(
 
   # Finalize keys (skip abstract entities).
   _resolve_keys(entities)
+
+  # Propagate abstractness: a concrete relationship with an abstract
+  # endpoint cannot round-trip through the loader (concrete relationships
+  # require concrete endpoints). Mark such relationships abstract so the
+  # emitted ontology is loadable. This primarily catches OWL
+  # ObjectProperties whose rdfs:range is a pure SKOS concept.
+  for rel in owl_relationships.values():
+    if rel.abstract:
+      continue
+    from_abstract = (
+        rel.from_entity in entities and entities[rel.from_entity].abstract
+    )
+    to_abstract = rel.to_entity in entities and entities[rel.to_entity].abstract
+    if from_abstract or to_abstract:
+      rel.abstract = True
 
   # Merge OWL and SKOS relationships into a single list.
   all_relationships: list[_ImportedRelationship] = (
