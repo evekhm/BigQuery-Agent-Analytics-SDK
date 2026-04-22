@@ -142,21 +142,28 @@ the right tools all along -- the prompt just did not let it use them.
 
 ### Step 4: Improve Prompt (~1-2 min)
 
-This step does three things:
+This step uses an ADK **LoopAgent** -- an agent that improves the
+agent. It has six tools and decides its own workflow:
 
 1. **Extract failures:** Failed synthetic cases are pulled from the
    quality report and added to the golden eval set. The golden set
    grows from 3 to ~10 cases.
 
-2. **Rewrite:** Gemini receives the current prompt, the quality report,
-   and the available tool signatures. It analyzes what went wrong and
-   generates a new candidate prompt.
+2. **LoopAgent runs:** The `prompt_engineer` LlmAgent reads the
+   quality report and current prompt via tool calls, then calls
+   `generate_candidate` to get an improved prompt from Gemini. It
+   auto-extracts tool signatures from the target agent's code, so it
+   knows exactly what tools are available.
 
-3. **Regression gate:** The candidate is tested against the FULL
-   golden set (original 3 + extracted failures). The candidate must
-   pass ALL cases -- not just the original 3, but also the failures
-   it was designed to fix. If any case fails, the candidate is
-   rejected and Gemini generates a new one (up to 3 attempts).
+3. **Regression gate:** The agent calls `test_candidate` to run the
+   FULL golden set (original 3 + extracted failures). The candidate
+   must pass ALL cases. If any fail, the LLM analyzes why and
+   generates a better candidate. The loop exits when all cases pass
+   (via `exit_loop`) or after 3 iterations.
+
+The improvement module is reusable -- it works with any ADK agent, not
+just this demo. You provide an `ImprovementConfig` with your agent
+factory, tools, prompt file, and eval set.
 
 *(point to output)* V1 becomes V2. The candidate passed all 10 cases.
 

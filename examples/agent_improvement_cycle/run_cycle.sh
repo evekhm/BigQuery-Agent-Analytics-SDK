@@ -143,7 +143,7 @@ if [[ $PREFLIGHT_EXIT -ne 0 ]]; then
   echo ""
 
   EVAL_RESULTS="$REPORTS_DIR/latest_eval_results.json"
-  python3 "$SCRIPT_DIR/improver/improve_agent.py" \
+  python3 "$SCRIPT_DIR/run_improvement.py" \
     --from-eval-results "$EVAL_RESULTS"
 
   # Verify the fix worked
@@ -317,8 +317,17 @@ with open('$SCRIPT_DIR/eval/eval_cases.json') as f:
     print(len(json.load(f)['eval_cases']))
 ")
 
-  python3 "$SCRIPT_DIR/improver/improve_agent.py" \
+  set +e
+  python3 "$SCRIPT_DIR/run_improvement.py" \
     "$REPORT_JSON"
+  IMPROVE_EXIT=$?
+  set -e
+
+  if [[ $IMPROVE_EXIT -ne 0 ]]; then
+    echo ""
+    echo "  WARNING: Improvement step did not produce a new prompt version."
+    echo "  Continuing with current prompt."
+  fi
 
   NEW_V=$(python3 -c "
 import sys; sys.path.insert(0, '$SCRIPT_DIR')

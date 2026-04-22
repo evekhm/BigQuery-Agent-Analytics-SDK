@@ -66,9 +66,16 @@ eval/
   generate_traffic.py # Generates synthetic user traffic via Gemini
   run_eval.py        # Runs eval/traffic cases via ADK InMemoryRunner
 
-improver/
-  improve_agent.py   # Improves prompt, validates via golden eval gate
+agent_improvement/   # Reusable improvement module (works with any ADK agent)
+  config.py          # ImprovementConfig dataclass
+  improver_agent.py  # LoopAgent + LlmAgent with tool-based workflow
+  eval_runner.py     # Run eval cases + LLM judge
+  prompt_adapter.py  # ABC + PythonFilePromptAdapter
+  tool_introspection.py # Auto-extract tool signatures from agent tools
+  traffic_generator.py  # ABC + GenericTrafficGenerator
+  prompts.py         # Default judge/improver prompt templates
 
+run_improvement.py   # Entry point: wires company_info_agent config
 reports/             # Generated reports, eval results
 
 run_cycle.sh         # Orchestrator: traffic -> eval -> quality -> improve
@@ -155,27 +162,57 @@ The `--app-name` flag filters to sessions from this agent only (ignoring
 other agents sharing the same BigQuery dataset). `--output-json` produces
 a structured report that the improver consumes programmatically.
 
-### Step 4: Auto-Improve (improve_agent.py)
+### Step 4: Auto-Improve (agent_improvement module)
 
-`improve_agent.py` reads the quality report JSON and calls Gemini to fix
-the prompt:
+The improvement step is implemented as an ADK **LoopAgent** that wraps a
+single **LlmAgent** with six tools. The LLM decides the workflow — when
+to retry, when to exit — rather than following a hardcoded loop.
+
+```
+LoopAgent("prompt_improver", max_iterations=3)
+  └── LlmAgent("prompt_engineer")
+        tools: read_quality_report, read_current_prompt,
+               generate_candidate, test_candidate,
+               write_prompt, exit_loop
+```
+
+The workflow:
 
 1. **Extracts failed synthetic cases** from the quality report and
    adds them to the golden eval set (`eval_cases.json`). The golden
    set grows before the candidate is generated.
-2. Reads the quality report (which sessions failed and why)
-3. Reads the current prompt from `agent/prompts.py`
-4. Sends both to Gemini along with the available tool list, asking it
-   to fix the identified issues
-5. Gemini returns a JSON with an improved prompt and a summary of changes
-6. **Runs the full golden eval set** (original + extracted cases)
-   against the candidate prompt (no BigQuery logging). A lightweight
-   LLM judge scores each response. The candidate must pass ALL cases,
-   including the failures it was designed to fix. If any case fails,
-   the candidate is rejected and a new one is generated (up to 3
-   attempts).
-7. The script writes `PROMPT_V{N+1}` to `prompts.py` and updates
-   `CURRENT_PROMPT` to point to it
+2. The LlmAgent calls `read_quality_report` to understand which
+   sessions failed and why
+3. Calls `read_current_prompt` to get the current prompt and
+   auto-extracted tool signatures
+4. Calls `generate_candidate` — Gemini generates an improved prompt
+   based on the failures and available tools
+5. Calls `test_candidate` — runs the full golden eval set (original +
+   extracted cases) against the candidate. A lightweight LLM judge
+   scores each response.
+6. If all cases pass: calls `write_prompt` then `exit_loop`
+7. If some fail: the LLM analyzes *why* they failed and loops back to
+   generate a better candidate
+
+The LoopAgent exits when `exit_loop` fires (ADK's built-in escalation)
+or after `max_iterations` (default 3).
+
+The `agent_improvement` module is **reusable for any ADK agent**. To
+apply it to a different agent, create an `ImprovementConfig` with your
+agent factory, tools, prompt adapter, and eval cases path:
+
+```python
+from agent_improvement import ImprovementConfig, PythonFilePromptAdapter, run_improvement
+
+config = ImprovementConfig(
+    agent_factory=lambda prompt: Agent(name="my_agent", instruction=prompt, tools=[...]),
+    agent_name="my_agent",
+    agent_tools=[my_tool_a, my_tool_b],
+    prompt_adapter=PythonFilePromptAdapter("path/to/prompts.py"),
+    eval_cases_path="path/to/eval_cases.json",
+)
+asyncio.run(run_improvement(config, report_path="quality_report.json"))
+```
 
 On the next cycle, the agent uses the improved prompt, the golden eval
 set has grown, and a fresh batch of synthetic traffic tests new edges.
@@ -183,11 +220,18 @@ set has grown, and a fresh batch of synthetic traffic tests new edges.
 ### Data Flow
 
 ```
-generate_traffic.py   run_eval.py          quality_report.py    improve_agent.py
+generate_traffic.py   run_eval.py          quality_report.py    run_improvement.py
   (Gemini)      -->    (agent + BQ)   -->    (BQ -> scores)  -->   |
                                                                    v
-                                                             golden eval gate
-                                                             (throwaway agent)
+                                                             LoopAgent
+                                                             (prompt_improver)
+                                                                   |
+                                                             LlmAgent tools:
+                                                             read_quality_report
+                                                             generate_candidate
+                                                             test_candidate
+                                                             write_prompt
+                                                             exit_loop
                                                                    |
                                                                    v
                                                              prompt fix +
