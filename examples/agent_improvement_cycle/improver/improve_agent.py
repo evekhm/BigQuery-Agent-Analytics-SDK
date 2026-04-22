@@ -35,6 +35,8 @@ from dotenv import load_dotenv
 from google import genai
 import google.auth
 from google.genai.types import GenerateContentConfig
+from google.genai.types import HttpOptions
+from google.genai.types import HttpRetryOptions
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _DEMO_DIR = os.path.dirname(_SCRIPT_DIR)
@@ -200,7 +202,15 @@ def call_improver(
   )
 
   model_id = os.getenv("DEMO_MODEL_ID", "gemini-2.5-flash")
-  client = genai.Client()
+  client = genai.Client(
+      http_options=HttpOptions(
+          retry_options=HttpRetryOptions(
+              attempts=3,
+              initial_delay=10.0,
+              http_status_codes=[429],
+          )
+      )
+  )
   response = client.models.generate_content(
       model=model_id,
       contents=prompt,
@@ -226,11 +236,16 @@ def _create_eval_agent(prompt: str):
   sys.path.insert(0, _DEMO_DIR)
   from agent.tools import get_current_date
   from agent.tools import lookup_company_policy
+  from google.adk.models import Gemini
+  from google.genai import types
 
   model_id = os.getenv("DEMO_MODEL_ID", "gemini-2.5-flash")
   agent = Agent(
       name="eval_agent",
-      model=model_id,
+      model=Gemini(
+          model=model_id,
+          retry_options=types.HttpRetryOptions(attempts=3),
+      ),
       description="An agent that answers questions about company policies.",
       instruction=prompt,
       tools=[lookup_company_policy, get_current_date],
@@ -249,7 +264,15 @@ async def _judge_cases(
   from eval.run_eval import run_single_case
 
   model_id = os.getenv("DEMO_MODEL_ID", "gemini-2.5-flash")
-  client = genai.Client()
+  client = genai.Client(
+      http_options=HttpOptions(
+          retry_options=HttpRetryOptions(
+              attempts=3,
+              initial_delay=10.0,
+              http_status_codes=[429],
+          )
+      )
+  )
 
   async def _judge_one(case: dict) -> dict:
     result = await run_single_case(runner, case, user_id="eval")
@@ -438,6 +461,53 @@ def add_eval_cases(new_cases: list[dict]) -> int:
 # ---------------------------------------------------------------------------
 
 
+def build_report_from_eval_results(eval_results_path: str) -> dict:
+  """Build a synthetic quality report from golden eval results JSON.
+
+  This allows the improver to fix a prompt when pre-flight golden eval
+  fails, without needing a full BigQuery quality report.
+  """
+  with open(eval_results_path) as f:
+    results = json.load(f)
+
+  total = len(results)
+  passed = sum(1 for r in results if r.get("pass", False))
+  failed = total - passed
+
+  sessions = []
+  for r in results:
+    is_pass = r.get("pass", False)
+    sessions.append(
+        {
+            "session_id": r.get("session_id", r.get("case_id", "?")),
+            "question": r.get("question", ""),
+            "response": r.get("response", ""),
+            "metrics": {
+                "response_usefulness": {
+                    "category": "meaningful" if is_pass else "unhelpful",
+                    "justification": r.get("reason", ""),
+                },
+                "task_grounding": {
+                    "category": "grounded" if is_pass else "ungrounded",
+                    "justification": "",
+                },
+            },
+        }
+    )
+
+  return {
+      "summary": {
+          "total_sessions": total,
+          "meaningful": passed,
+          "meaningful_rate": round(100 * passed / total) if total else 0,
+          "partial": 0,
+          "unhelpful": failed,
+          "unhelpful_rate": round(100 * failed / total) if total else 0,
+      },
+      "sessions": sessions,
+  }
+
+
 def main() -> None:
   parser = argparse.ArgumentParser(
       description="Improve agent prompt based on quality report"
@@ -446,11 +516,23 @@ def main() -> None:
       "report_json",
       help="Path to the quality report JSON file",
   )
+  parser.add_argument(
+      "--from-eval-results",
+      action="store_true",
+      help=(
+          "Treat report_json as golden eval results (from run_eval.py"
+          " --golden) instead of a BigQuery quality report. Builds a"
+          " synthetic report and runs the improvement loop."
+      ),
+  )
   args = parser.parse_args()
 
   # Load inputs
   print("\n=== Agent Improver ===\n")
-  report = load_quality_report(args.report_json)
+  if args.from_eval_results:
+    report = build_report_from_eval_results(args.report_json)
+  else:
+    report = load_quality_report(args.report_json)
   current_prompt, current_version = load_current_prompt()
   print(f"  Current prompt version: v{current_version}")
   print(f"  Quality score: {report['summary']['meaningful_rate']}% meaningful")

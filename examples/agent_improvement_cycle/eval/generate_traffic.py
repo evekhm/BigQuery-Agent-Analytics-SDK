@@ -30,6 +30,8 @@ from dotenv import load_dotenv
 from google import genai
 import google.auth
 from google.genai.types import GenerateContentConfig
+from google.genai.types import HttpOptions
+from google.genai.types import HttpRetryOptions
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _DEMO_DIR = os.path.dirname(_SCRIPT_DIR)
@@ -105,7 +107,15 @@ def generate_traffic(count: int = 10) -> list[dict]:
   )
 
   model_id = os.getenv("DEMO_MODEL_ID", "gemini-2.5-flash")
-  client = genai.Client()
+  client = genai.Client(
+      http_options=HttpOptions(
+          retry_options=HttpRetryOptions(
+              attempts=3,
+              initial_delay=10.0,
+              http_status_codes=[429],
+          )
+      )
+  )
   response = client.models.generate_content(
       model=model_id,
       contents=prompt,

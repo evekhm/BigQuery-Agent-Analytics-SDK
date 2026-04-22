@@ -139,8 +139,27 @@ step_end
 
 if [[ $PREFLIGHT_EXIT -ne 0 ]]; then
   echo ""
-  echo "  ERROR: Pre-flight golden eval failed. Fix the prompt before running the cycle."
-  exit 1
+  echo "  PRE-FLIGHT FAILED: Auto-improving prompt to pass golden eval set..."
+  echo ""
+
+  EVAL_RESULTS="$REPORTS_DIR/latest_eval_results.json"
+  python3 "$SCRIPT_DIR/improver/improve_agent.py" \
+    --from-eval-results "$EVAL_RESULTS"
+
+  # Verify the fix worked
+  echo ""
+  echo "  Re-running pre-flight after auto-fix..."
+  echo ""
+  set +e
+  python3 "$SCRIPT_DIR/eval/run_eval.py" --golden
+  PREFLIGHT_EXIT=$?
+  set -e
+
+  if [[ $PREFLIGHT_EXIT -ne 0 ]]; then
+    echo ""
+    echo "  ERROR: Pre-flight still fails after auto-fix. Manual intervention required."
+    exit 1
+  fi
 fi
 
 for cycle in $(seq 1 "$CYCLES"); do

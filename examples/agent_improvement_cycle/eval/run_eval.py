@@ -30,6 +30,8 @@ from google.adk.runners import InMemoryRunner
 import google.auth
 from google.genai.types import Content
 from google.genai.types import GenerateContentConfig
+from google.genai.types import HttpOptions
+from google.genai.types import HttpRetryOptions
 from google.genai.types import Part
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -170,6 +172,8 @@ async def run_golden_eval(eval_cases_path: str | None = None) -> list[dict]:
   from agent.tools import get_current_date
   from agent.tools import lookup_company_policy
   from google.adk.agents import Agent
+  from google.adk.models import Gemini
+  from google.genai import types
 
   sys.path.insert(0, _DEMO_DIR)
   from agent.prompts import CURRENT_PROMPT
@@ -179,14 +183,25 @@ async def run_golden_eval(eval_cases_path: str | None = None) -> list[dict]:
 
   test_agent = Agent(
       name="golden_eval_agent",
-      model=model_id,
+      model=Gemini(
+          model=model_id,
+          retry_options=types.HttpRetryOptions(attempts=3),
+      ),
       description="An agent that answers questions about company policies.",
       instruction=CURRENT_PROMPT,
       tools=[lookup_company_policy, get_current_date],
   )
 
   runner = InMemoryRunner(agent=test_agent, app_name="golden_eval")
-  client = genai.Client()
+  client = genai.Client(
+      http_options=HttpOptions(
+          retry_options=HttpRetryOptions(
+              attempts=3,
+              initial_delay=10.0,
+              http_status_codes=[429],
+          )
+      )
+  )
 
   from agent.prompts import CURRENT_VERSION
 
