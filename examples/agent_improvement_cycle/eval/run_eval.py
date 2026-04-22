@@ -13,11 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Run evaluation cases against the company info agent.
+"""Run evaluation cases against an ADK agent.
 
 Two modes:
   - Default: send traffic through the real agent with BQ logging.
   - --golden: LLM judge mode via EvalRunner (no BQ, pass/fail scoring).
+
+Supports ``--agent-config`` to load any agent's config.json.
+Falls back to the demo's company_info_agent when not provided.
 """
 
 import asyncio
@@ -25,30 +28,17 @@ import json
 import os
 import sys
 
-from dotenv import load_dotenv
 from google.adk.runners import InMemoryRunner
-import google.auth
 from google.genai.types import Content
 from google.genai.types import Part
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _DEMO_DIR = os.path.dirname(_SCRIPT_DIR)
 
-# Load environment and configure Vertex AI
-_env_path = os.path.join(_DEMO_DIR, ".env")
-if os.path.exists(_env_path):
-  load_dotenv(dotenv_path=_env_path)
-
-_, _auth_project = google.auth.default()
-_project_id = os.getenv("PROJECT_ID") or _auth_project
-os.environ["GOOGLE_CLOUD_PROJECT"] = _project_id
-os.environ["GOOGLE_CLOUD_LOCATION"] = os.getenv(
-    "DEMO_AGENT_LOCATION", "us-central1"
-)
-os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
-
-# Add parent to path so we can import the agent
+# Add parent to path so we can import agent_improvement
 sys.path.insert(0, _DEMO_DIR)
+
+_DEFAULT_CONFIG = os.path.join(_DEMO_DIR, "improve", "config.json")
 
 
 def load_eval_cases(path: str | None = None) -> list[dict]:
@@ -95,18 +85,21 @@ async def run_single_case(
 
 async def run_all_cases(
     eval_cases_path: str | None = None,
+    config_path: str | None = None,
 ) -> list[dict]:
   """Run all eval cases with BQ logging (traffic mode)."""
-  cases = load_eval_cases(eval_cases_path)
+  from agent_improvement import load_agent_module
+
+  mod, cfg = load_agent_module(config_path or _DEFAULT_CONFIG)
+  eval_path = eval_cases_path or cfg["eval_cases_path"]
+
+  cases = load_eval_cases(eval_path)
   print(f"\nRunning {len(cases)} cases...\n")
 
-  from agent.agent import bq_logging_plugin
-  from agent.agent import root_agent
-
   runner = InMemoryRunner(
-      agent=root_agent,
-      app_name="company_info_agent",
-      plugins=[bq_logging_plugin],
+      agent=mod.root_agent,
+      app_name=cfg["app_name"],
+      plugins=[mod.bq_logging_plugin],
   )
 
   async def _run_one(i: int, case: dict) -> dict:
@@ -137,31 +130,31 @@ async def run_all_cases(
   return results
 
 
-async def run_golden_eval(eval_cases_path: str | None = None) -> list[dict]:
-  """Run eval cases with LLM judge, no BQ logging.
-
-  Uses the shared create_agent factory and EvalRunner from
-  agent_improvement to avoid duplicating agent creation and judge logic.
-  """
-  from agent.agent import create_agent
-  from agent.prompts import CURRENT_PROMPT
-  from agent.prompts import CURRENT_VERSION
+async def run_golden_eval(
+    eval_cases_path: str | None = None,
+    config_path: str | None = None,
+) -> list[dict]:
+  """Run eval cases with LLM judge, no BQ logging."""
   from agent_improvement import EvalRunner
+  from agent_improvement import load_config
 
-  eval_path = eval_cases_path or os.path.join(_SCRIPT_DIR, "eval_cases.json")
-  model_id = os.getenv("DEMO_MODEL_ID", "gemini-2.5-flash")
+  config = load_config(config_path or _DEFAULT_CONFIG)
+  eval_path = eval_cases_path or config.eval_cases_path
 
   eval_runner = EvalRunner(
-      agent_factory=create_agent,
-      model_id=model_id,
+      agent_factory=config.agent_factory,
+      model_id=config.model_id,
+      judge_prompt=config.judge_prompt,
   )
 
   cases = eval_runner.load_eval_cases(eval_path)
-  print(f"\n  Evaluating {len(cases)} cases with prompt V{CURRENT_VERSION}")
+  _, version = config.prompt_adapter.read_prompt()
+  print(f"\n  Evaluating {len(cases)} cases with prompt V{version}")
   print("  (LLM judge, no BigQuery logging)\n")
 
+  prompt, _ = config.prompt_adapter.read_prompt()
   all_passed, passed, total, results = await eval_runner.run_golden_eval(
-      CURRENT_PROMPT, eval_path
+      prompt, eval_path
   )
 
   rate = round(100 * passed / total) if total else 0
@@ -184,24 +177,32 @@ def main() -> None:
       "--eval-cases",
       type=str,
       default=None,
-      help="Path to eval_cases.json (default: eval/eval_cases.json)",
+      help="Path to eval_cases.json (default: from agent config)",
   )
   parser.add_argument(
       "--golden",
       action="store_true",
       help=(
           "LLM judge mode: run cases through a local agent (no BQ"
-          " logging) and score each response pass/fail. Uses --eval-cases"
-          " if provided, otherwise defaults to eval_cases.json."
+          " logging) and score each response pass/fail."
+      ),
+  )
+  parser.add_argument(
+      "--agent-config",
+      type=str,
+      default=None,
+      help=(
+          "Path to the agent's config.json. If not"
+          " provided, uses the demo's company_info_agent config."
       ),
   )
   args = parser.parse_args()
 
   if args.golden:
-    results = asyncio.run(run_golden_eval(args.eval_cases))
+    results = asyncio.run(run_golden_eval(args.eval_cases, args.agent_config))
     failed = sum(1 for r in results if not r.get("pass", False))
   else:
-    results = asyncio.run(run_all_cases(args.eval_cases))
+    results = asyncio.run(run_all_cases(args.eval_cases, args.agent_config))
     failed = 0
 
   # Write results to a file for reference

@@ -20,6 +20,8 @@ cases pass.
 """
 
 from agent_improvement.config import ImprovementConfig
+from agent_improvement.config_loader import load_agent_module
+from agent_improvement.config_loader import load_config
 from agent_improvement.eval_runner import EvalRunner
 from agent_improvement.improver_agent import create_improver_agent
 from agent_improvement.improver_agent import run_improvement
@@ -34,5 +36,7 @@ __all__ = [
     "EvalRunner",
     "extract_tool_signatures",
     "create_improver_agent",
+    "load_agent_module",
+    "load_config",
     "run_improvement",
 ]
