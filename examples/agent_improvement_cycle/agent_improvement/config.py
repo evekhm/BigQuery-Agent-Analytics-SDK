@@ -47,6 +47,9 @@ class ImprovementConfig:
           giving up.
       quality_threshold: Fraction of golden cases that must pass
           (1.0 = all cases).
+      judge_prompt: Custom LLM judge prompt template. Must contain
+          ``{question}`` and ``{response}`` placeholders. If *None*,
+          uses the default judge prompt.
   """
 
   agent_factory: Callable[[str], Agent]
@@ -58,3 +61,4 @@ class ImprovementConfig:
   model_id: str = "gemini-2.5-flash"
   max_attempts: int = 3
   quality_threshold: float = 1.0
+  judge_prompt: str | None = None

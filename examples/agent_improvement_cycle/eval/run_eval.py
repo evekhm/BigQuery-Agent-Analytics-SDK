@@ -15,8 +15,9 @@
 
 """Run evaluation cases against the company info agent.
 
-Sends each question from eval_cases.json to the agent via ADK Runner.
-Sessions are logged to BigQuery via the agent's telemetry plugin.
+Two modes:
+  - Default: send traffic through the real agent with BQ logging.
+  - --golden: LLM judge mode via EvalRunner (no BQ, pass/fail scoring).
 """
 
 import asyncio
@@ -25,13 +26,9 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from google import genai
 from google.adk.runners import InMemoryRunner
 import google.auth
 from google.genai.types import Content
-from google.genai.types import GenerateContentConfig
-from google.genai.types import HttpOptions
-from google.genai.types import HttpRetryOptions
 from google.genai.types import Part
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -99,7 +96,7 @@ async def run_single_case(
 async def run_all_cases(
     eval_cases_path: str | None = None,
 ) -> list[dict]:
-  """Run all eval cases and print results."""
+  """Run all eval cases with BQ logging (traffic mode)."""
   cases = load_eval_cases(eval_cases_path)
   print(f"\nRunning {len(cases)} cases...\n")
 
@@ -140,109 +137,36 @@ async def run_all_cases(
   return results
 
 
-GOLDEN_JUDGE_PROMPT = """You are evaluating an AI agent's response to a policy question.
-
-Question: {question}
-Response: {response}
-
-Return JSON with exactly these fields:
-{{
-  "pass": true or false,
-  "reason": "one-sentence explanation"
-}}
-
-A response PASSES if it provides a specific, substantive answer to the question.
-A response FAILS if it says "I don't know", defers to HR, or gives vague/generic information without specifics.
-Return ONLY the JSON, no other text.
-"""
-
-
 async def run_golden_eval(eval_cases_path: str | None = None) -> list[dict]:
   """Run eval cases with LLM judge, no BQ logging.
 
-  Creates a throwaway agent with the current prompt and scores each
-  response with a lightweight LLM judge.  Returns results with
-  pass/fail verdicts.
-
-  Args:
-      eval_cases_path: Path to eval cases JSON. If None, defaults to
-          eval_cases.json (the golden set). Can point to any file
-          with the same schema (e.g. synthetic traffic).
+  Uses the shared create_agent factory and EvalRunner from
+  agent_improvement to avoid duplicating agent creation and judge logic.
   """
-  from agent.tools import get_current_date
-  from agent.tools import lookup_company_policy
-  from google.adk.agents import Agent
-  from google.adk.models import Gemini
-  from google.genai import types
-
-  sys.path.insert(0, _DEMO_DIR)
+  from agent.agent import create_agent
   from agent.prompts import CURRENT_PROMPT
+  from agent.prompts import CURRENT_VERSION
+  from agent_improvement import EvalRunner
 
-  cases = load_eval_cases(eval_cases_path)
+  eval_path = eval_cases_path or os.path.join(_SCRIPT_DIR, "eval_cases.json")
   model_id = os.getenv("DEMO_MODEL_ID", "gemini-2.5-flash")
 
-  test_agent = Agent(
-      name="golden_eval_agent",
-      model=Gemini(
-          model=model_id,
-          retry_options=types.HttpRetryOptions(attempts=3),
-      ),
-      description="An agent that answers questions about company policies.",
-      instruction=CURRENT_PROMPT,
-      tools=[lookup_company_policy, get_current_date],
+  eval_runner = EvalRunner(
+      agent_factory=create_agent,
+      model_id=model_id,
   )
 
-  runner = InMemoryRunner(agent=test_agent, app_name="golden_eval")
-  client = genai.Client(
-      http_options=HttpOptions(
-          retry_options=HttpRetryOptions(
-              attempts=3,
-              initial_delay=10.0,
-              http_status_codes=[429],
-          )
-      )
-  )
-
-  from agent.prompts import CURRENT_VERSION
-
+  cases = eval_runner.load_eval_cases(eval_path)
   print(f"\n  Evaluating {len(cases)} cases with prompt V{CURRENT_VERSION}")
   print("  (LLM judge, no BigQuery logging)\n")
 
-  async def _eval_one(i: int, case: dict) -> dict:
-    result = await run_single_case(runner, case, user_id="golden_eval")
-
-    judge_prompt = GOLDEN_JUDGE_PROMPT.format(
-        question=case["question"],
-        response=result["response"][:500],
-    )
-    judge_response = client.models.generate_content(
-        model=model_id,
-        contents=judge_prompt,
-        config=GenerateContentConfig(
-            temperature=0.0,
-            response_mime_type="application/json",
-        ),
-    )
-    verdict = json.loads(judge_response.text)
-    result["pass"] = verdict.get("pass", False)
-    result["reason"] = verdict.get("reason", "")
-
-    tag = "PASS" if result["pass"] else "FAIL"
-    suffix = "" if result["pass"] else f" - {result['reason']}"
-    print(f"  [{i}/{len(cases)}] {tag}: {case['id']}{suffix}")
-    return result
-
-  results = list(
-      await asyncio.gather(
-          *[_eval_one(i, case) for i, case in enumerate(cases, 1)]
-      )
+  all_passed, passed, total, results = await eval_runner.run_golden_eval(
+      CURRENT_PROMPT, eval_path
   )
 
-  passed = sum(1 for r in results if r.get("pass", False))
-  total = len(cases)
   rate = round(100 * passed / total) if total else 0
   print(f"\n  Result: {passed}/{total} passed ({rate}%)")
-  if passed == total:
+  if all_passed:
     print("  All cases pass.")
   else:
     print(f"  {total - passed} case(s) failed.")

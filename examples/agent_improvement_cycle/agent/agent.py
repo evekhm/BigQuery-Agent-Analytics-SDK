@@ -33,6 +33,9 @@ from .prompts import CURRENT_PROMPT
 from .tools import get_current_date
 from .tools import lookup_company_policy
 
+# Agent tools — single list, reused everywhere
+AGENT_TOOLS = [lookup_company_policy, get_current_date]
+
 # Load environment
 _env_path = os.path.join(os.path.dirname(__file__), "../.env")
 if os.path.exists(_env_path):
@@ -51,20 +54,27 @@ os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
 os.environ["GOOGLE_CLOUD_LOCATION"] = LOCATION
 os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
 
+
+def create_agent(prompt: str) -> Agent:
+  """Create a company_info_agent with the given prompt.
+
+  This is the single agent factory for the demo. Used by eval,
+  improvement, and the main agent entry point.
+  """
+  return Agent(
+      name="company_info_agent",
+      model=Gemini(
+          model=MODEL_ID,
+          retry_options=types.HttpRetryOptions(attempts=3),
+      ),
+      description="An agent that answers questions about company policies.",
+      instruction=prompt,
+      tools=AGENT_TOOLS,
+  )
+
+
 # Build the agent
-root_agent = Agent(
-    name="company_info_agent",
-    model=Gemini(
-        model=MODEL_ID,
-        retry_options=types.HttpRetryOptions(attempts=3),
-    ),
-    description="An agent that answers questions about company policies.",
-    instruction=CURRENT_PROMPT,
-    tools=[
-        lookup_company_policy,
-        get_current_date,
-    ],
-)
+root_agent = create_agent(CURRENT_PROMPT)
 
 # BigQuery telemetry
 bq_config = BigQueryLoggerConfig(

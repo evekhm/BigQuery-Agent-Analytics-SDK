@@ -16,8 +16,8 @@
 """Run the improvement cycle for the company_info_agent.
 
 This is the demo entry point that wires the reusable
-``agent_improvement`` module to the company_info_agent's specific
-tools, prompt storage, and eval set.
+``agent_improvement`` module to the company_info_agent's shared
+agent factory, tools, and eval set.
 
 Usage:
     python run_improvement.py <report.json>
@@ -30,10 +30,7 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from google.adk.agents import Agent
-from google.adk.models import Gemini
 import google.auth
-from google.genai import types
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -53,8 +50,8 @@ os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
 # Ensure the demo directory is on the path
 sys.path.insert(0, _SCRIPT_DIR)
 
-from agent.tools import get_current_date
-from agent.tools import lookup_company_policy
+from agent.agent import AGENT_TOOLS
+from agent.agent import create_agent
 from agent_improvement import ImprovementConfig
 from agent_improvement import PythonFilePromptAdapter
 from agent_improvement import run_improvement
@@ -64,25 +61,11 @@ _PROMPTS_PATH = os.path.join(_SCRIPT_DIR, "agent", "prompts.py")
 _EVAL_CASES_PATH = os.path.join(_SCRIPT_DIR, "eval", "eval_cases.json")
 
 
-def _agent_factory(prompt: str) -> Agent:
-  """Create a company_info_agent with the given prompt."""
-  return Agent(
-      name="company_info_agent",
-      model=Gemini(
-          model=_MODEL_ID,
-          retry_options=types.HttpRetryOptions(attempts=3),
-      ),
-      description="An agent that answers questions about company policies.",
-      instruction=prompt,
-      tools=[lookup_company_policy, get_current_date],
-  )
-
-
 def _build_config() -> ImprovementConfig:
   return ImprovementConfig(
-      agent_factory=_agent_factory,
+      agent_factory=create_agent,
       agent_name="company_info_agent",
-      agent_tools=[lookup_company_policy, get_current_date],
+      agent_tools=AGENT_TOOLS,
       prompt_adapter=PythonFilePromptAdapter(_PROMPTS_PATH),
       eval_cases_path=_EVAL_CASES_PATH,
       model_id=_MODEL_ID,

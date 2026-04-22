@@ -14,7 +14,7 @@
 
 """Default prompt templates for the improvement cycle."""
 
-JUDGE_PROMPT = """You are evaluating an AI agent's response to a policy question.
+JUDGE_PROMPT = """You are evaluating an AI agent's response to a user question.
 
 Question: {question}
 Response: {response}
@@ -26,7 +26,7 @@ Return JSON with exactly these fields:
 }}
 
 A response PASSES if it provides a specific, substantive answer to the question.
-A response FAILS if it says "I don't know", defers to HR, or gives vague/generic information without specifics.
+A response FAILS if it says "I don't know", defers elsewhere without answering, or gives vague/generic information without specifics.
 Return ONLY the JSON, no other text.
 """
 

@@ -189,6 +189,7 @@ async def test_candidate(candidate_prompt: str) -> str:
   eval_runner = EvalRunner(
       agent_factory=config.agent_factory,
       model_id=config.model_id,
+      judge_prompt=config.judge_prompt,
   )
   all_passed, passed, total, results = await eval_runner.run_golden_eval(
       candidate_prompt, config.eval_cases_path
@@ -262,7 +263,7 @@ def extract_failed_cases(report: dict) -> list[dict]:
             "id": case_id,
             "question": question,
             "category": "unknown",
-            "expected_tool": "lookup_company_policy",
+            "expected_tool": "unknown",
             "notes": f"Extracted from failed synthetic traffic ({cat})",
         }
     )

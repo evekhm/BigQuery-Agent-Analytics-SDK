@@ -39,15 +39,6 @@ Before running the demo, run the setup script. It performs five checks:
    BigQuery dataset, and table name. Creates the BQ dataset if it does
    not exist.
 
-After setup completes, verify the `.env` file looks correct:
-
-```shell
-cat .env
-```
-
-You should see `PROJECT_ID`, `DATASET_ID`, `TABLE_ID`, and
-`GOOGLE_CLOUD_LOCATION` populated.
-
 ---
 
 ## Show the V1 Prompt (30s)
