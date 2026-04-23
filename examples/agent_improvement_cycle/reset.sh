@@ -22,8 +22,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "Resetting demo to initial state..."
 
-# Restore original golden eval set from git
+# Restore original golden eval set and prompts.py from git
 git checkout -- "$SCRIPT_DIR/eval/eval_cases.json"
+git checkout -- "$SCRIPT_DIR/agent/prompts.py"
 
 # Delete old prompt, create fresh V1 in Vertex AI
 python3 "$SCRIPT_DIR/setup_vertex.py"

@@ -151,29 +151,16 @@ print(len(vs) + 1)
 # Helper: display the current prompt text and version
 _show_prompt() {
   local label="${1:-Current prompt}"
+  echo ""
+  echo "  ${label}:"
+  echo ""
   if [[ "$PROMPT_STORAGE" == "vertex" && -n "$VERTEX_PROMPT_ID" ]]; then
-    python3 -c "
-from vertexai import Client
-c = Client(location='us-central1')
-p = c.prompts.get(prompt_id='$VERTEX_PROMPT_ID')
-text = ''
-if p.prompt_data and p.prompt_data.system_instruction and p.prompt_data.system_instruction.parts:
-    text = p.prompt_data.system_instruction.parts[0].text or ''
-vs = list(c.prompts.list_versions(prompt_id='$VERTEX_PROMPT_ID'))
-v = len(vs) + 1
-print(f'  $label (v{v}, {len(text)} chars):')
-print()
-for line in text.strip().split('\n'):
-    print(f'    {line}')
-print()
-print(f'  To inspect: python3 -c \"from vertexai import Client; c=Client(location=\\\"us-central1\\\"); p=c.prompts.get(prompt_id=\\\"$VERTEX_PROMPT_ID\\\"); print(p.prompt_data.system_instruction.parts[0].text)\"')
-"
+    "$SCRIPT_DIR/show_prompt.sh" "$VERTEX_PROMPT_ID"
   else
     local v
     v=$(grep -oP "${VERSION_VAR}\s*=\s*\K\d+" "$PROMPTS_PATH")
-    echo "  $label (v${v}):"
-    echo ""
-    echo "    File: $PROMPTS_PATH"
+    echo "  Version: v${v}"
+    echo "  File: $PROMPTS_PATH"
     echo ""
   fi
 }
@@ -502,7 +489,7 @@ echo ""
 echo "  Prompt version:   V${FINAL_V}"
 echo "  Golden eval set:  $FINAL_GOLDEN cases"
 echo ""
-echo "  Artifacts:"
+echo "  Artifacts (reports/):"
 ls -1 "$REPORTS_DIR"/ 2>/dev/null | sed 's/^/    /' || echo "    (none)"
 echo ""
 echo "  Inspect changes:"
