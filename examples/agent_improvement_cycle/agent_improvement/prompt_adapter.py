@@ -220,12 +220,14 @@ class VertexPromptAdapter(PromptAdapter):
       project: str | None = None,
       location: str = "us-central1",
       model: str = "gemini-2.5-flash",
+      local_backup: PythonFilePromptAdapter | None = None,
   ) -> None:
     from vertexai import Client
 
     self._prompt_id = prompt_id
     self._model = model
     self._client = Client(project=project, location=location)
+    self._local_backup = local_backup
 
   @property
   def prompt_id(self) -> str:
@@ -318,4 +320,12 @@ class VertexPromptAdapter(PromptAdapter):
         self._prompt_id,
         summary,
     )
+
+    # Mirror to local prompts.py so changes are visible in git diff
+    if self._local_backup:
+      self._local_backup.write_prompt(text, version, summary)
+      logger.info(
+          "Mirrored prompt v%d to %s", new_version, self._local_backup.path
+      )
+
     return new_version

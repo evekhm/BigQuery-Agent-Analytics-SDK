@@ -86,11 +86,21 @@ def _build_prompt_adapter(cfg: dict):
           "prompt_storage='vertex' requires 'vertex_prompt_id' in config"
           " or VERTEX_PROMPT_ID env var. Run setup_vertex.py first."
       )
+    # Also mirror prompt changes to local prompts.py for git tracking
+    local_backup = None
+    if cfg.get("prompts_path"):
+      local_backup = PythonFilePromptAdapter(
+          cfg["prompts_path"],
+          prompt_variable=cfg.get("prompt_variable", "CURRENT_PROMPT"),
+          version_variable=cfg.get("version_variable", "CURRENT_VERSION"),
+      )
+
     return VertexPromptAdapter(
         prompt_id=prompt_id,
         project=cfg.get("vertex_project"),
         location=cfg.get("vertex_location", "us-central1"),
         model=cfg.get("model_id", "gemini-2.5-flash"),
+        local_backup=local_backup,
     )
 
   return PythonFilePromptAdapter(
