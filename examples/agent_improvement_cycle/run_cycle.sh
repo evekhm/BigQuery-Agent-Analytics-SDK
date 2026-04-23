@@ -435,10 +435,7 @@ for cycle in $(seq 1 "$CYCLES"); do
   echo "  While we wait, here is the current golden eval set ($GOLDEN_AFTER cases):"
   jq -r '.eval_cases[] | "    [\(.id)] \(.question) (\(.category // "general"))"' "$EVAL_CASES_PATH" 2>/dev/null || true
   echo ""
-  if [[ -f "$REPORTS_DIR/ground_truth_latest.json" ]]; then
-    GT_COUNT=$(jq 'length' "$REPORTS_DIR/ground_truth_latest.json" 2>/dev/null || echo "0")
-    echo "  Teacher agent generated $GT_COUNT ground truth answers (reports/ground_truth_latest.json)"
-  fi
+
   MAX_RETRIES=6
   for attempt in $(seq 1 "$MAX_RETRIES"); do
     sleep 30

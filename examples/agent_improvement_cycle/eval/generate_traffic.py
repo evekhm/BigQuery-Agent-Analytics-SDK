@@ -116,17 +116,27 @@ def generate_traffic(count: int = 10) -> list[dict]:
           )
       )
   )
-  response = client.models.generate_content(
-      model=model_id,
-      contents=prompt,
-      config=GenerateContentConfig(
-          temperature=0.8,
-          response_mime_type="application/json",
-      ),
-  )
-
-  result = json.loads(response.text)
-  return result.get("traffic_cases", [])
+  # Gemini occasionally returns malformed JSON even with
+  # response_mime_type="application/json". Retry up to 3 times.
+  for attempt in range(3):
+    response = client.models.generate_content(
+        model=model_id,
+        contents=prompt,
+        config=GenerateContentConfig(
+            temperature=0.8,
+            response_mime_type="application/json",
+        ),
+    )
+    try:
+      result = json.loads(response.text)
+      return result.get("traffic_cases", [])
+    except json.JSONDecodeError:
+      if attempt < 2:
+        print(
+            f"  Gemini returned malformed JSON, retrying ({attempt + 1}/3)..."
+        )
+      else:
+        raise
 
 
 def main() -> None:

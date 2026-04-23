@@ -1,6 +1,6 @@
 # Agent Improvement Cycle - Demo Script
 
-**Duration:** ~5 minutes (single cycle), ~15 minutes (3 cycles)
+**Duration:** ~6 minutes (single cycle), ~18 minutes (3 cycles)
 **Format:** Live terminal walkthrough
 
 ---
@@ -108,7 +108,7 @@ get added here, raising the bar each iteration.
 
 ---
 
-## Run One Cycle (~5 min)
+## Run One Cycle (~6 min)
 
 **Command:**
 ```shell
@@ -215,7 +215,7 @@ entirely new questions.
 
 ---
 
-## Multi-Cycle Run (optional, ~15 min)
+## Multi-Cycle Run (optional, ~18 min)
 
 To show the full loop with prompt refinement across cycles:
 
