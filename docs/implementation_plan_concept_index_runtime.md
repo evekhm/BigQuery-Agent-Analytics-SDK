@@ -9,6 +9,8 @@ Two packages touched:
 - `bigquery_ontology` — compiler, CLI, fingerprint infrastructure.
 - `bigquery_agent_analytics` — `OntologyRuntime`, resolvers, verification.
 
+**Package-boundary scope.** Both packages are build-time + trace-consumption libraries. `bigquery_ontology` is offline CLI + model classes. `bigquery_agent_analytics` is the consumption-layer SDK read by evaluation, curation, and analysis pipelines over trace data the BQ AA Plugin already wrote to BigQuery. **Neither is a turn-time agent SDK**; the live-agent side is owned by the BQ AA Plugin (separate package). The word *Runtime* in this plan refers to the `OntologyRuntime` class and to library call time at the consuming pipeline, not to a live agent loop. A future agent-facing resolver package may reuse the `EntityResolver` `Protocol` introduced here, but it is out of scope for this plan.
+
 This plan assumes issue #57 is either merged or lands in parallel. The concept index's value is ~80% from SKOS annotations (`skos:notation`, `skos:prefLabel`, `skos:altLabel`, `skos:broader`) being preserved through import.
 
 ## Acceptance criteria
@@ -123,7 +125,12 @@ Tests: D9, D10, D11, D12, D14.
 
 Work: integration tests across ontology → compile → runtime → resolve; end-to-end example in `examples/`; migration note for users who had local resolution code; full doc pass.
 
-**Definition of done**: `examples/concept_index_quickstart.py` (or similar) runs end-to-end against a real BQ dataset using a fixture ontology. README section added. Migration note published.
+The migration note explicitly splits into two paths — the motivating feedback-gist resolver ran at live-agent time, and the SDK does not replace it directly:
+
+- **Trace-consumption migration** (pipelines / notebooks / curation scripts): direct drop-in. `SynonymResolver` + the compiled concept index replaces the pipeline's local resolver. This is the primary supported path.
+- **Live-agent migration**: not yet supported. Keep your existing in-agent resolver until a separate agent-facing package ships that reuses the `EntityResolver` `Protocol`. Users who want forward-compatibility can prototype against the Protocol today so that swap is mechanical when the agent-facing package lands.
+
+**Definition of done**: `examples/concept_index_quickstart.py` (or similar) runs end-to-end against a real BQ dataset using a fixture ontology. README section added. Migration note published with both paths clearly labeled.
 
 ### Phase 5 — Contrib + polish
 
