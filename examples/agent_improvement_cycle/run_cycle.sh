@@ -38,8 +38,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REPORTS_DIR="$SCRIPT_DIR/reports"
 
-# Suppress noisy Python warnings (e.g. authlib deprecation)
+# Suppress noisy Python warnings and INFO-level log spam
 export PYTHONWARNINGS="ignore"
+export LOGLEVEL="${LOGLEVEL:-WARNING}"
 
 # Load .env from the demo directory so all scripts see the same config
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
