@@ -30,12 +30,6 @@ import importlib.util
 import json
 import os
 
-from google.genai.types import Content
-from google.genai.types import Part
-from vertexai import Client
-from vertexai._genai.types.common import Prompt
-from vertexai._genai.types.common import PromptData
-
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ENV_PATH = os.path.join(_SCRIPT_DIR, ".env")
 _CONFIG_PATH = os.path.join(_SCRIPT_DIR, "config.json")
@@ -112,6 +106,14 @@ def main() -> None:
   model_id = config.get("model_id", "gemini-2.5-flash")
   app_name = config.get("app_name", "agent")
   location = config.get("vertex_location", "us-central1")
+
+  print(f"  Loading Vertex AI SDK...")
+  from google.genai.types import Content
+  from google.genai.types import Part
+  from vertexai import Client
+  from vertexai._genai.types.common import Prompt
+  from vertexai._genai.types.common import PromptData
+
   print(f"  Initializing Vertex AI client (location={location})...")
   client = Client(location=location)
 
