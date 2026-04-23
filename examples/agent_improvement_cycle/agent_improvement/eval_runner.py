@@ -105,9 +105,23 @@ class EvalRunner:
 
   async def judge_case(self, case: dict, result: dict) -> dict:
     """Score a single case response with the LLM judge."""
+    expected_tool = case.get("expected_tool", "")
+    if expected_tool and expected_tool != "unknown":
+      tool_check = f"Expected tool: {expected_tool}"
+      tool_fail_rule = (
+          f"\nA response also FAILS if it provides specific-sounding "
+          f"information without evidence that the '{expected_tool}' "
+          f"tool was called (the answer may be hallucinated)."
+      )
+    else:
+      tool_check = ""
+      tool_fail_rule = ""
+
     judge_prompt = self._judge_prompt.format(
         question=case["question"],
         response=result["response"][:500],
+        tool_check=tool_check,
+        tool_fail_rule=tool_fail_rule,
     )
     judge_response = self._client.models.generate_content(
         model=self._model_id,

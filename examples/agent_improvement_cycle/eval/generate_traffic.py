@@ -129,7 +129,24 @@ def generate_traffic(count: int = 10) -> list[dict]:
     )
     try:
       result = json.loads(response.text)
-      return result.get("traffic_cases", [])
+      cases = result.get("traffic_cases", [])
+
+      # Dedup against existing golden eval questions
+      existing_lower = {q.lower() for q in existing}
+      cases = [
+          c
+          for c in cases
+          if c.get("question", "").lower() not in existing_lower
+      ]
+
+      if len(cases) < count // 2:
+        if attempt < 2:
+          print(
+              f"  Only got {len(cases)} cases (wanted {count}),"
+              f" retrying ({attempt + 1}/3)..."
+          )
+          continue
+      return cases
     except json.JSONDecodeError:
       if attempt < 2:
         print(
@@ -137,6 +154,7 @@ def generate_traffic(count: int = 10) -> list[dict]:
         )
       else:
         raise
+  return []
 
 
 def main() -> None:

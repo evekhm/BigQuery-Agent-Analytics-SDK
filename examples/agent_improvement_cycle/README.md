@@ -452,6 +452,14 @@ Vertex AI Prompt Optimizer also runs the teacher model to generate
 ground truth for failed sessions. A typical single cycle uses ~50-80
 Gemini calls; a 3-cycle run uses ~200-300.
 
+**Golden eval set growth:** The golden eval set grows each cycle as
+failed synthetic cases are extracted into it. Each improvement attempt
+validates the candidate prompt against the full golden set (N agent
+calls + N judge calls per attempt, up to `max_attempts` retries).
+After several cycles, the golden set can reach 20+ cases, increasing
+both cost and runtime of the validation step. For long-running
+deployments, consider periodically pruning redundant golden cases.
+
 ## Future / Next Steps
 
 - **Sentiment analysis integration**: Extend the quality evaluation to

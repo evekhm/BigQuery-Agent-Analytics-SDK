@@ -18,7 +18,7 @@ JUDGE_PROMPT = """You are evaluating an AI agent's response to a user question.
 
 Question: {question}
 Response: {response}
-
+{tool_check}
 Return JSON with exactly these fields:
 {{
   "pass": true or false,
@@ -26,7 +26,7 @@ Return JSON with exactly these fields:
 }}
 
 A response PASSES if it provides a specific, substantive answer to the question.
-A response FAILS if it says "I don't know", defers elsewhere without answering, or gives vague/generic information without specifics.
+A response FAILS if it says "I don't know", defers elsewhere without answering, or gives vague/generic information without specifics.{tool_fail_rule}
 Return ONLY the JSON, no other text.
 """
 
