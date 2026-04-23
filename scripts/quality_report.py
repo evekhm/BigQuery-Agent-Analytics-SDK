@@ -42,6 +42,10 @@ Usage:
     python quality_report.py --app-name my_agent  # filter to a specific agent
     python quality_report.py --output-json r.json # write structured JSON output
 """
+import warnings
+
+warnings.filterwarnings("ignore")
+
 import argparse
 import json
 import logging

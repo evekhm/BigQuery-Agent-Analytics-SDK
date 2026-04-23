@@ -23,6 +23,10 @@ Supports ``--agent-config`` to load any agent's config.json.
 Falls back to the demo's company_info_agent when not provided.
 """
 
+import warnings
+
+warnings.filterwarnings("ignore")
+
 import asyncio
 import json
 import os

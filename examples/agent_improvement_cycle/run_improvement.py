@@ -24,6 +24,10 @@ Usage:
     python run_improvement.py --from-eval-results <eval_results.json>
 """
 
+import warnings
+
+warnings.filterwarnings("ignore")
+
 import argparse
 import asyncio
 import os

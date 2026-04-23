@@ -38,9 +38,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REPORTS_DIR="$SCRIPT_DIR/reports"
 
-# Suppress noisy Python warnings and INFO-level log spam
+# Suppress noisy Python warnings (authlib, etc.) and INFO-level log spam.
+# Belt-and-suspenders: env var for child processes, -W flag for direct calls.
 export PYTHONWARNINGS="ignore"
 export LOGLEVEL="${LOGLEVEL:-WARNING}"
+PY="python3 -W ignore"
 
 # Load .env from the demo directory so all scripts see the same config
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
@@ -128,7 +130,7 @@ VERTEX_LOCATION=$(jq -r '.vertex_location // "us-central1"' "$AGENT_CONFIG")
 if [[ "$PROMPT_STORAGE" == "vertex" && -z "$VERTEX_PROMPT_ID" ]]; then
   echo ""
   echo "  No Vertex AI prompt configured. Running setup..."
-  python3 "$SCRIPT_DIR/setup_vertex.py"
+  $PY "$SCRIPT_DIR/setup_vertex.py"
   # Re-read the prompt ID after setup
   VERTEX_PROMPT_ID=$(jq -r '.vertex_prompt_id // ""' "$AGENT_CONFIG")
 fi
@@ -218,7 +220,7 @@ echo ""
 step_start
 
 set +e
-python3 "$SCRIPT_DIR/eval/run_eval.py" --golden $AGENT_CONFIG_FLAG
+$PY "$SCRIPT_DIR/eval/run_eval.py" --golden $AGENT_CONFIG_FLAG
 PREFLIGHT_EXIT=$?
 set -e
 step_end "Pre-flight check"
@@ -246,7 +248,7 @@ with open('$EVAL_RESULTS') as f:
   echo "  Auto-improving prompt to pass golden eval set..."
   echo ""
 
-  python3 "$SCRIPT_DIR/run_improvement.py" \
+  $PY "$SCRIPT_DIR/run_improvement.py" \
     $AGENT_CONFIG_FLAG \
     --from-eval-results "$EVAL_RESULTS"
 
@@ -280,7 +282,7 @@ for cycle in $(seq 1 "$CYCLES"); do
   step_start
 
   TRAFFIC_JSON="$REPORTS_DIR/synthetic_traffic_cycle_${cycle}.json"
-  python3 "$TRAFFIC_GENERATOR" \
+  $PY "$TRAFFIC_GENERATOR" \
     --count "$TRAFFIC_COUNT" \
     --output "$TRAFFIC_JSON"
 
@@ -308,7 +310,7 @@ for cycle in $(seq 1 "$CYCLES"); do
   echo ""
   step_start
 
-  python3 "$SCRIPT_DIR/eval/run_eval.py" \
+  $PY "$SCRIPT_DIR/eval/run_eval.py" \
     $AGENT_CONFIG_FLAG \
     --eval-cases "$TRAFFIC_JSON"
 
@@ -341,7 +343,7 @@ for cycle in $(seq 1 "$CYCLES"); do
   for attempt in $(seq 1 "$MAX_RETRIES"); do
     sleep 15
     echo "  Querying BigQuery and scoring sessions with LLM judge..."
-    python3 "$REPO_ROOT/scripts/quality_report.py" \
+    $PY "$REPO_ROOT/scripts/quality_report.py" \
       --app-name "$APP_NAME" \
       --output-json "$REPORT_JSON" \
       --limit "$ACTUAL_TRAFFIC_COUNT" \
@@ -402,7 +404,7 @@ for cycle in $(seq 1 "$CYCLES"); do
   GOLDEN_BEFORE=$(jq '.eval_cases | length' "$EVAL_CASES_PATH")
 
   set +e
-  python3 "$SCRIPT_DIR/run_improvement.py" \
+  $PY "$SCRIPT_DIR/run_improvement.py" \
     $AGENT_CONFIG_FLAG \
     "$REPORT_JSON"
   IMPROVE_EXIT=$?
@@ -440,13 +442,13 @@ for cycle in $(seq 1 "$CYCLES"); do
   # 5a: Generate fresh synthetic traffic
   echo "  --- Fresh traffic ---"
   FRESH_TRAFFIC="$REPORTS_DIR/synthetic_traffic_cycle_${cycle}_fresh.json"
-  python3 "$TRAFFIC_GENERATOR" \
+  $PY "$TRAFFIC_GENERATOR" \
     --count "$TRAFFIC_COUNT" \
     --output "$FRESH_TRAFFIC"
   ACTUAL_FRESH_COUNT=$(jq '.eval_cases | length' "$FRESH_TRAFFIC")
 
   # 5c: Run fresh traffic through the improved agent (WITH BQ logging)
-  python3 "$SCRIPT_DIR/eval/run_eval.py" \
+  $PY "$SCRIPT_DIR/eval/run_eval.py" \
     $AGENT_CONFIG_FLAG \
     --eval-cases "$FRESH_TRAFFIC"
 
@@ -467,7 +469,7 @@ for cycle in $(seq 1 "$CYCLES"); do
   for attempt in $(seq 1 "$MAX_RETRIES"); do
     sleep 30
     echo "  Querying BigQuery and scoring sessions with LLM judge..."
-    python3 "$REPO_ROOT/scripts/quality_report.py" \
+    $PY "$REPO_ROOT/scripts/quality_report.py" \
       --app-name "$APP_NAME" \
       --output-json "$FRESH_REPORT" \
       --limit "$ACTUAL_FRESH_COUNT" \
