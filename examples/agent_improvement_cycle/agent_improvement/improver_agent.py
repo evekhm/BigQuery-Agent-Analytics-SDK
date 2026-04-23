@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 
 from agent_improvement.config import ImprovementConfig
@@ -260,6 +261,16 @@ async def _generate_via_vertex_optimizer(
   gt_results = await _generate_ground_truth(config, failed)
   print(f"  Generated {len(gt_results)} ground truth answers.")
 
+  # Save ground truth to reports/ for inspection
+  gt_dir = os.path.join(
+      os.path.dirname(config.eval_cases_path), "..", "reports"
+  )
+  os.makedirs(gt_dir, exist_ok=True)
+  gt_path = os.path.join(gt_dir, "ground_truth_latest.json")
+  with open(gt_path, "w") as f:
+    json.dump(gt_results, f, indent=2)
+  print(f"  Ground truth saved to {gt_path}")
+
   if not gt_results:
     return json.dumps(
         {
@@ -281,9 +292,24 @@ async def _generate_via_vertex_optimizer(
 
   df = pd.DataFrame(rows)
 
+  # Build an augmented prompt for the optimizer. Two critical additions:
+  # 1. A tool-use directive so the optimizer doesn't just inline data
+  # 2. Tool signatures so it knows what's available
+  tool_sigs = format_tool_signatures(config.agent_tools)
+  tool_use_directive = (
+      "\n\nIMPORTANT: You have access to tools that contain complete, "
+      "up-to-date policy information. For EVERY policy question, you "
+      "MUST call the appropriate tool to look up the answer. Do NOT "
+      "answer from memory or from the information listed above. The "
+      "tools are the authoritative source. NEVER say 'I don't have "
+      "that information' or 'contact HR' without first calling a tool."
+      "\n\nAVAILABLE TOOLS:\n" + tool_sigs
+  )
+  prompt_with_tools = current_prompt + tool_use_directive
+
   client = Client(location="us-central1")
   result = client.prompts.optimize(
-      prompt=current_prompt,
+      prompt=prompt_with_tools,
       config=OptimizeConfig(
           optimization_target=(
               OptimizeTarget.OPTIMIZATION_TARGET_FEW_SHOT_TARGET_RESPONSE
@@ -305,6 +331,21 @@ async def _generate_via_vertex_optimizer(
   else:
     improved = current_prompt
     changes = "Optimizer returned no changes"
+
+  # The optimizer rewrites the entire prompt and strips tool
+  # instructions. Re-append them so the agent actually uses tools
+  # instead of relying on data inlined by the optimizer.
+  if "lookup_company_policy" not in improved and tool_sigs:
+    improved += (
+        "\n\nIMPORTANT: You have access to tools that contain complete, "
+        "up-to-date policy information. For EVERY policy question, you "
+        "MUST call the appropriate tool to look up the answer. Do NOT "
+        "rely solely on the information above — the tools may have more "
+        "details. NEVER say 'I don't have that information' or 'contact "
+        "HR' without first calling a tool."
+        "\n\nAVAILABLE TOOLS:\n" + tool_sigs
+    )
+    changes += " + tool-use directive re-appended"
 
   return json.dumps(
       {
@@ -609,11 +650,17 @@ async def run_improvement(
         report = json.load(f)
 
   _, old_version = config.prompt_adapter.read_prompt()
-  print(f"\n=== Agent Improver ===\n")
-  print(f"  Current prompt version: v{old_version}")
+  rate = report["summary"]["meaningful_rate"]
+  print("")
+  print("  ┌──────────────────────────────────────┐")
+  print("  │          PROMPT IMPROVER              │")
+  print("  ├──────────────────────────────────────┤")
+  print(f"  │  Prompt version:  v{old_version:<17}│")
   print(
-      f"  Quality score:" f" {report['summary']['meaningful_rate']}% meaningful"
+      f"  │  Quality score:   {rate}% meaningful{' ' * (7 - len(str(rate)))}│"
   )
+  print("  └──────────────────────────────────────┘")
+  print("")
 
   if report["summary"].get("total_sessions", 0) == 0:
     print("  ERROR: Report has 0 sessions. Cannot improve.")

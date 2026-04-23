@@ -74,8 +74,17 @@ def create_agent(prompt: str) -> Agent:
 
 # Read prompt: Vertex AI Prompt Registry if configured, else local prompts.py
 _vertex_prompt_id = os.getenv("VERTEX_PROMPT_ID")
+_prompt_text = None
+
 if _vertex_prompt_id:
-  from vertexai import Client as _VertexClient
+  try:
+    from vertexai import Client as _VertexClient
+  except ImportError:
+    raise ImportError(
+        "VERTEX_PROMPT_ID is set but vertexai.Client is not available. "
+        "Install google-cloud-aiplatform>=1.148.0: "
+        "pip install 'google-cloud-aiplatform>=1.148.0'"
+    )
 
   _vx_client = _VertexClient(project=project_id, location=LOCATION)
   _prompt_obj = _vx_client.prompts.get(prompt_id=_vertex_prompt_id)

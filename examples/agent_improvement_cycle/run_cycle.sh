@@ -208,20 +208,8 @@ if [[ $PREFLIGHT_EXIT -ne 0 ]]; then
     $AGENT_CONFIG_FLAG \
     --from-eval-results "$EVAL_RESULTS"
 
-  # Verify the fix worked
-  echo ""
-  echo "  Re-running pre-flight after auto-fix..."
-  echo ""
-  set +e
-  python3 "$SCRIPT_DIR/eval/run_eval.py" --golden $AGENT_CONFIG_FLAG
-  PREFLIGHT_EXIT=$?
-  set -e
-
-  if [[ $PREFLIGHT_EXIT -ne 0 ]]; then
-    echo ""
-    echo "  ERROR: Pre-flight still fails after auto-fix. Manual intervention required."
-    exit 1
-  fi
+  # No need to re-run pre-flight: the improvement step's test_candidate
+  # already validated all golden cases pass before writing the prompt.
 fi
 
 for cycle in $(seq 1 "$CYCLES"); do

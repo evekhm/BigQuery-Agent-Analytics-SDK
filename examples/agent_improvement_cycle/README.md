@@ -274,9 +274,9 @@ export PROJECT_ID=my-project-id
 ./setup.sh
 ```
 
-This installs dependencies, verifies credentials, creates the
-BigQuery dataset, and creates the initial V1 prompt in the
-Vertex AI Prompt Registry.
+This installs dependencies (`pip install bigquery-agent-analytics[improvement]`),
+verifies credentials, creates the BigQuery dataset, and creates
+the initial V1 prompt in the Vertex AI Prompt Registry.
 
 ### 3. Run the demo
 

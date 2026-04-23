@@ -81,9 +81,12 @@ echo "  Vertex AI API: enabled"
 # 4. Install dependencies
 echo ""
 echo "[4/6] Installing Python dependencies..."
-cd "$REPO_ROOT"
-pip install -e ".[all]" --quiet --no-warn-script-location 2>&1 | tail -1 || pip install -e ".[all]"
-pip install python-dotenv --quiet --no-warn-script-location 2>&1 | tail -1 || pip install python-dotenv
+# Remove standalone vertexai if present — it conflicts with the one
+# bundled in google-cloud-aiplatform and shadows the newer version.
+pip show vertexai 2>/dev/null | grep -q "^Version:" && \
+  pip uninstall vertexai -y --quiet 2>/dev/null || true
+pip install "google-cloud-aiplatform>=1.148.0" "pandas>=2.0.0" "python-dotenv>=1.0.0" \
+  "google-adk>=1.0.0" "google-genai>=1.0.0" --quiet
 echo "  Dependencies installed."
 
 # 5. Configure environment
