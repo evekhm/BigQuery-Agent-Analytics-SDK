@@ -275,6 +275,18 @@ async def _generate_via_vertex_optimizer(
   with open(gt_path, "w") as f:
     json.dump(gt_results, f, indent=2)
   print(f"  Ground truth saved to {gt_path}")
+  print("")
+  print("  Agent (bad) vs Teacher (ground truth) comparison:")
+  print("  " + "─" * 68)
+  for i, r in enumerate(gt_results, 1):
+    q = r["question"]
+    bad = r["bad_response"][:200].replace("\n", " ").strip()
+    good = r["ground_truth"][:200].replace("\n", " ").strip()
+    print(f"  Q{i}: {q}")
+    print(f"    Agent:   {bad}")
+    print(f"    Teacher: {good}")
+    print("")
+  print("  " + "─" * 68)
 
   if not gt_results:
     return json.dumps(
@@ -312,7 +324,26 @@ async def _generate_via_vertex_optimizer(
   )
   prompt_with_tools = current_prompt + tool_use_directive
 
-  client = Client(location="us-central1")
+  print(
+      f"  Calling Vertex AI Prompt Optimizer with {len(gt_results)} "
+      "ground truth examples (this may take 30-60s)..."
+  )
+
+  from google.genai.types import HttpOptions
+  from google.genai.types import HttpRetryOptions
+
+  client = Client(
+      location="us-central1",
+      http_options=HttpOptions(
+          retry_options=HttpRetryOptions(
+              attempts=6,
+              initial_delay=2.0,
+              max_delay=60.0,
+              exp_base=2.0,
+              http_status_codes=[429, 503],
+          ),
+      ),
+  )
   result = client.prompts.optimize(
       prompt=prompt_with_tools,
       config=OptimizeConfig(
@@ -322,6 +353,8 @@ async def _generate_via_vertex_optimizer(
           examples_dataframe=df,
       ),
   )
+
+  print("  Optimizer returned a candidate prompt.")
 
   parsed = result.parsed_response
   if (
@@ -391,6 +424,18 @@ async def test_candidate(candidate_prompt: str) -> str:
       results.
   """
   config: ImprovementConfig = _state["config"]
+
+  cases_count = 0
+  try:
+    with open(config.eval_cases_path) as _f:
+      cases_count = len(json.load(_f).get("eval_cases", []))
+  except Exception:
+    pass
+  print(
+      f"\n  Testing candidate prompt against {cases_count} golden eval "
+      "cases (regression gate)..."
+  )
+
   eval_runner = EvalRunner(
       agent_factory=config.agent_factory,
       model_id=config.model_id,
@@ -756,9 +801,9 @@ async def run_improvement(
   _, old_version = config.prompt_adapter.read_prompt()
   rate = report["summary"]["meaningful_rate"]
   print("")
-  print("   ┌──────────────────────────────────────┐")
-  print("   │          PROMPT IMPROVER             │")
-  print("   ├──────────────────────────────────────┤")
+  print("  ┌──────────────────────────────────────┐")
+  print("  │          PROMPT IMPROVER             │")
+  print("  ├──────────────────────────────────────┤")
   print(f"  │  Prompt version:  v{old_version:<17} │")
   print(
       f"  │  Quality score:   {rate}% meaningful{' ' * (7 - len(str(rate)))}│"

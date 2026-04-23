@@ -173,7 +173,9 @@ _show_prompt() {
 step_start() { STEP_START_TIME=$(date +%s); }
 step_end() {
   local elapsed=$(( $(date +%s) - STEP_START_TIME ))
-  echo "  (${elapsed}s)"
+  local label="${1:-Step}"
+  echo ""
+  echo "  Done. ${label} completed in ${elapsed}s."
 }
 
 separator() {
@@ -217,7 +219,7 @@ set +e
 python3 "$SCRIPT_DIR/eval/run_eval.py" --golden $AGENT_CONFIG_FLAG
 PREFLIGHT_EXIT=$?
 set -e
-step_end
+step_end "Pre-flight check"
 
 if [[ $PREFLIGHT_EXIT -ne 0 ]]; then
   echo ""
@@ -260,7 +262,12 @@ for cycle in $(seq 1 "$CYCLES"); do
     --count "$TRAFFIC_COUNT" \
     --output "$TRAFFIC_JSON"
 
-  step_end
+  echo ""
+  echo "  Generated questions saved to: $TRAFFIC_JSON"
+  echo "  Sample questions:"
+  jq -r '.eval_cases[:3][] | "    - \(.question)"' "$TRAFFIC_JSON" 2>/dev/null || true
+
+  step_end "Traffic generation"
 
   # =========================================================================
   # STEP 2: Run synthetic traffic through the agent
@@ -279,7 +286,7 @@ for cycle in $(seq 1 "$CYCLES"); do
     $AGENT_CONFIG_FLAG \
     --eval-cases "$TRAFFIC_JSON"
 
-  step_end
+  step_end "Agent execution"
 
   # =========================================================================
   # STEP 3: Evaluate session quality
@@ -299,9 +306,15 @@ for cycle in $(seq 1 "$CYCLES"); do
   rm -f "$REPORT_JSON"
 
   # Retry with backoff for BigQuery streaming buffer propagation.
+  echo "  Waiting 15s for BigQuery streaming buffer to flush..."
+  echo ""
+  echo "  While we wait, here are the questions that were sent to the agent:"
+  jq -r '.eval_cases[] | "    [\(.id)] \(.question)"' "$TRAFFIC_JSON" 2>/dev/null || true
+  echo ""
   MAX_RETRIES=6
   for attempt in $(seq 1 "$MAX_RETRIES"); do
     sleep 15
+    echo "  Querying BigQuery and scoring sessions with LLM judge..."
     python3 "$REPO_ROOT/scripts/quality_report.py" \
       --app-name "$APP_NAME" \
       --output-json "$REPORT_JSON" \
@@ -313,7 +326,7 @@ for cycle in $(seq 1 "$CYCLES"); do
       if [[ "$SESSION_COUNT" -gt 0 ]]; then
         break
       fi
-      echo "  No sessions found yet (attempt $attempt/$MAX_RETRIES), waiting for BQ propagation..."
+      echo "  No sessions found yet (attempt $attempt/$MAX_RETRIES), retrying in 15s..."
       rm -f "$REPORT_JSON"
     fi
 
@@ -331,8 +344,10 @@ for cycle in $(seq 1 "$CYCLES"); do
   echo ""
   echo "  BASELINE SCORE (V${CURRENT_V}): $(jq -r '.summary.meaningful_rate' "$REPORT_JSON")% meaningful"
   echo "  ($(jq -r '.summary.meaningful' "$REPORT_JSON") meaningful, $(jq -r '.summary.partial' "$REPORT_JSON") partial, $(jq -r '.summary.unhelpful' "$REPORT_JSON") unhelpful out of $(jq -r '.summary.total_sessions' "$REPORT_JSON"))"
+  echo ""
+  echo "  Report saved to: $REPORT_JSON"
 
-  step_end
+  step_end "Quality evaluation"
 
   # =========================================================================
   # STEP 4: Auto-improve the agent prompt
@@ -380,7 +395,7 @@ for cycle in $(seq 1 "$CYCLES"); do
   echo "  Prompt:      V${CURRENT_V} -> V${NEW_V}"
   echo "  Golden set:  $GOLDEN_BEFORE -> $GOLDEN_AFTER cases"
 
-  step_end
+  step_end "Prompt improvement"
 
   # =========================================================================
   # STEP 5: Measure improvement with fresh traffic
@@ -410,13 +425,24 @@ for cycle in $(seq 1 "$CYCLES"); do
 
   # 5d: Score from BigQuery
   echo ""
-  echo "  --- Quality report from BigQuery (waiting for propagation) ---"
+  echo "  --- Quality report from BigQuery ---"
   FRESH_REPORT="$REPORTS_DIR/quality_report_cycle_${cycle}_after.json"
   rm -f "$FRESH_REPORT"
 
+  echo ""
+  echo "  Waiting 30s for BigQuery streaming buffer to flush..."
+  echo ""
+  echo "  While we wait, here is the current golden eval set ($GOLDEN_AFTER cases):"
+  jq -r '.eval_cases[] | "    [\(.id)] \(.question) (\(.category // "general"))"' "$EVAL_CASES_PATH" 2>/dev/null || true
+  echo ""
+  if [[ -f "$REPORTS_DIR/ground_truth_latest.json" ]]; then
+    GT_COUNT=$(jq 'length' "$REPORTS_DIR/ground_truth_latest.json" 2>/dev/null || echo "0")
+    echo "  Teacher agent generated $GT_COUNT ground truth answers (reports/ground_truth_latest.json)"
+  fi
   MAX_RETRIES=6
   for attempt in $(seq 1 "$MAX_RETRIES"); do
     sleep 30
+    echo "  Querying BigQuery and scoring sessions with LLM judge..."
     python3 "$REPO_ROOT/scripts/quality_report.py" \
       --app-name "$APP_NAME" \
       --output-json "$FRESH_REPORT" \
@@ -468,7 +494,7 @@ for cycle in $(seq 1 "$CYCLES"); do
   printf "  │  %-$((W - 2))s│\n" "$AFTER_LINE"
   printf "  └%s┘\n" "$HR"
 
-  step_end
+  step_end "Measurement"
 
   echo ""
   echo "  Cycle $cycle complete."
@@ -479,12 +505,20 @@ done
 # ---------------------------------------------------------------------------
 
 TOTAL_ELAPSED=$(( $(date +%s) - CYCLE_START_TIME ))
+TOTAL_MIN=$((TOTAL_ELAPSED / 60))
+TOTAL_SEC=$((TOTAL_ELAPSED % 60))
 FINAL_V=$(_read_version)
 FINAL_GOLDEN=$(jq '.eval_cases | length' "$EVAL_CASES_PATH")
 
 separator
 echo ""
-echo "  DONE  ($CYCLES cycle(s) in ${TOTAL_ELAPSED}s)"
+_show_prompt "FINAL PROMPT"
+separator
+echo ""
+
+separator
+echo ""
+echo "  DONE  ($CYCLES cycle(s), total wall time: ${TOTAL_MIN}m ${TOTAL_SEC}s)"
 echo ""
 echo "  Prompt version:   V${FINAL_V}"
 echo "  Golden eval set:  $FINAL_GOLDEN cases"
@@ -500,8 +534,4 @@ else
 fi
 echo "    git diff $(basename "$EVAL_CASES_PATH")   # new regression cases"
 
-separator
-echo ""
-_show_prompt "FINAL PROMPT"
-separator
-echo ""
+
