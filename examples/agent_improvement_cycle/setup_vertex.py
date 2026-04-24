@@ -107,10 +107,12 @@ def main() -> None:
   app_name = config.get("app_name", "agent")
   location = config.get("vertex_location", "us-central1")
 
-  print(f"  Loading Vertex AI SDK...")
+  print("  Loading Vertex AI SDK...")
   from google.genai.types import Content
   from google.genai.types import Part
   from vertexai import Client
+  from vertexai._genai.types.common import CreatePromptConfig
+  from vertexai._genai.types.common import DeletePromptConfig
   from vertexai._genai.types.common import Prompt
   from vertexai._genai.types.common import PromptData
 
@@ -123,7 +125,10 @@ def main() -> None:
   if existing_id:
     print(f"  Deleting old prompt {existing_id}...")
     try:
-      client.prompts.delete(prompt_id=existing_id, config={"timeout": 300})
+      client.prompts.delete(
+          prompt_id=existing_id,
+          config=DeletePromptConfig(timeout=300),
+      )
       print("  Deleted.")
     except Exception as e:
       print(f"  Warning: could not delete old prompt: {e}")
@@ -137,7 +142,7 @@ def main() -> None:
   )
   prompt = client.prompts.create(
       prompt=Prompt(prompt_data=prompt_data),
-      config={"prompt_display_name": app_name, "timeout": 300},
+      config=CreatePromptConfig(prompt_display_name=app_name, timeout=300),
   )
   prompt_id = prompt.prompt_id
   print(f"  Created prompt: {prompt_id}")
