@@ -1,3 +1,34 @@
+<!-- TOC -->
+* [Agent Improvement Cycle Demo](#agent-improvement-cycle-demo)
+  * [The Problem](#the-problem)
+  * [The Solution: Learn from the Field](#the-solution-learn-from-the-field)
+    * [Why This Matters](#why-this-matters)
+  * [Architecture](#architecture)
+    * [config.json](#configjson)
+  * [How the Cycle Works](#how-the-cycle-works)
+    * [Prompt Storage: Vertex AI Prompt Registry](#prompt-storage-vertex-ai-prompt-registry)
+    * [Prompt Optimization: Vertex AI Prompt Optimizer](#prompt-optimization-vertex-ai-prompt-optimizer)
+    * [Teacher Agent and Synthetic Ground Truth](#teacher-agent-and-synthetic-ground-truth)
+    * [Two Eval Sets](#two-eval-sets)
+    * [The Agent](#the-agent)
+    * [V1 Flaws (by design)](#v1-flaws-by-design)
+    * [Step-by-Step](#step-by-step)
+    * [Guardrails](#guardrails)
+  * [Quick Start](#quick-start)
+    * [Prerequisites](#prerequisites)
+    * [1. Configure environment](#1-configure-environment)
+    * [2. Run setup](#2-run-setup)
+    * [3. Run the demo](#3-run-the-demo)
+    * [4. Inspect results](#4-inspect-results)
+    * [Reset to V1](#reset-to-v1)
+  * [Using with Other Agents](#using-with-other-agents)
+  * [Configuration](#configuration)
+    * [config.json fields](#configjson-fields)
+    * [Environment variables (.env)](#environment-variables-env)
+    * [Cost notes](#cost-notes)
+  * [Future / Next Steps](#future--next-steps)
+<!-- TOC -->
+
 # Agent Improvement Cycle Demo
 
 Demonstrates a closed-loop agent improvement cycle powered by the
