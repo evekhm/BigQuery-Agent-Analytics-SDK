@@ -195,7 +195,7 @@ instruction that explicitly requires tool usage:
 ```
 You are an expert assistant. For EVERY question, you MUST call
 the available tools to look up the answer. NEVER say 'I don't
-know' or 'contact HR'. ALWAYS use the tools first, then answer
+know' or defer the user elsewhere. ALWAYS use the tools first, then answer
 based on the tool results. Be specific and thorough.
 ```
 
@@ -253,8 +253,7 @@ This demo uses two distinct sets of questions:
 
 ### The Agent
 
-A Q&A agent built with Google ADK that. It has
-two tools:
+A Q&A agent built with Google ADK. It has two tools:
 
 - `lookup_company_policy(topic)` - retrieves detailed policy data
 - `get_current_date()` - returns today's date for relative date questions
@@ -432,9 +431,11 @@ agent:
 | `traffic_generator` | required | Path to traffic generation script |
 | `model_id` | `gemini-2.5-flash` | Gemini model for agent and judge |
 | `max_attempts` | `3` | Max prompt improvement attempts per cycle |
-| `prompt_storage` | `vertex` | `vertex` or `python_file` |
+| `prompt_storage` | `python_file` | `vertex` or `python_file` |
 | `vertex_prompt_id` | `""` | Vertex AI prompt ID (auto-filled by setup) |
-| `use_vertex_optimizer` | `true` | Use Vertex AI Prompt Optimizer |
+| `vertex_project` | from `gcloud` | GCP project for Vertex AI (defaults to env) |
+| `vertex_location` | `us-central1` | Vertex AI region |
+| `use_vertex_optimizer` | `false` | Use Vertex AI Prompt Optimizer |
 | `teacher_model_id` | `null` | Model for teacher agent (null = same as `model_id`) |
 
 ### Environment variables (.env)
