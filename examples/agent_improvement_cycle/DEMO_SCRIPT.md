@@ -24,8 +24,9 @@ Registry**, versioned automatically with every improvement.
 
 ## Setup (1 min)
 
-**Command:**
+**Commands:**
 ```shell
+export PROJECT_ID=my-project-id
 ./setup.sh
 ```
 

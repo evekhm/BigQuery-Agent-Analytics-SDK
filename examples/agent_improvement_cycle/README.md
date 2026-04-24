@@ -1,5 +1,7 @@
 <!-- TOC -->
 * [Agent Improvement Cycle Demo](#agent-improvement-cycle-demo)
+  * [The Demo Agent](#the-demo-agent)
+    * [V1 Flaws (by design)](#v1-flaws-by-design)
   * [The Problem](#the-problem)
   * [The Solution: Learn from the Field](#the-solution-learn-from-the-field)
     * [Why This Matters](#why-this-matters)
@@ -10,8 +12,6 @@
     * [Prompt Optimization: Vertex AI Prompt Optimizer](#prompt-optimization-vertex-ai-prompt-optimizer)
     * [Teacher Agent and Synthetic Ground Truth](#teacher-agent-and-synthetic-ground-truth)
     * [Two Eval Sets](#two-eval-sets)
-    * [The Agent](#the-agent)
-    * [V1 Flaws (by design)](#v1-flaws-by-design)
     * [Step-by-Step](#step-by-step)
     * [Guardrails](#guardrails)
   * [Quick Start](#quick-start)
@@ -31,13 +31,55 @@
 
 # Agent Improvement Cycle Demo
 
-Demonstrates a closed-loop agent improvement cycle powered by the
-**BigQuery Agent Analytics SDK** and **Vertex AI Prompt Registry**.
-The cycle learns from real agent sessions logged in production, not
-just synthetic test cases. Prompts are stored, versioned, and
+A well-designed agent should learn from its own mistakes. This demo
+implements that paradigm: a continuous self-improvement cycle where
+the agent's real-world failures become the training data for its next
+version. It is powered by the **BigQuery Agent Analytics SDK** and
+**Vertex AI Prompt Registry**. Prompts are stored, versioned, and
 optimized in Vertex AI.
 
 For a guided walkthrough, see the [Demo Script](DEMO_SCRIPT.md).
+
+## The Demo Agent
+
+The agent used in this demo is a **company policy Q&A assistant**,
+built with [Google ADK](https://google.github.io/adk-docs/) and the
+[BigQuery Agent Analytics Plugin](https://adk.dev/integrations/bigquery-agent-analytics/).
+
+It's deliberately simple: a single LLM agent with just two tools:
+
+- **`lookup_company_policy(topic)`** — retrieves detailed policy data
+  on PTO, sick leave, remote work, expenses, benefits, and holidays.
+- **`get_current_date()`** — returns today's date and day of the week,
+  so the agent can answer date-relative questions like "Is next Friday
+  a holiday?"
+
+The agent's job is to answer employee questions — "How many PTO days
+do I get?", "What's the meal reimbursement limit?", "When is the next
+company holiday?", and so on.
+
+### V1 Flaws (by design)
+
+The V1 prompt is **intentionally flawed**. It tells the agent to
+"answer from the knowledge above" — a short, incomplete summary baked
+into the prompt — and to say "I don't know, contact HR" for anything
+not listed. The result: the agent ignores its own tools, even though
+those tools have all the answers. Users get vague deflections instead
+of useful information.
+
+| Flaw | Effect |
+|------|--------|
+| "Answer from knowledge above" | Agent ignores its tools entirely |
+| No expense/holiday info in prompt | Agent says "I don't know" instead of looking it up |
+| Vague "competitive benefits" | Agent deflects or hallucinates benefit details |
+| No date handling guidance | Agent cannot resolve "next Friday" |
+
+The tools have all the data. The flaw is that the prompt discourages
+the agent from using them. By running the self-improvement cycle,
+the system detects these failures, generates correct answers using a
+teacher agent, optimizes the prompt through the Vertex AI Prompt
+Optimizer, and produces a new version that actually uses the tools.
+The agent fixes itself.
 
 ## The Problem
 
@@ -281,31 +323,6 @@ This demo uses two distinct sets of questions:
 - **Synthetic traffic**: Generated fresh each cycle by Gemini. These
   simulate diverse, unpredictable user questions that differ from the
   golden set. They are the source of new failures that drive improvement.
-
-### The Agent
-
-A Q&A agent built with Google ADK. It has two tools:
-
-- `lookup_company_policy(topic)` - retrieves detailed policy data
-- `get_current_date()` - returns today's date for relative date questions
-
-Every session is logged to BigQuery via the `BigQueryAgentAnalyticsPlugin`,
-capturing the full conversation trace: user question, tool calls, and
-agent response.
-
-### V1 Flaws (by design)
-
-The v1 prompt has intentional problems that cause ~70% of sessions to fail:
-
-| Flaw | Effect |
-|------|--------|
-| "Answer from knowledge above" | Agent ignores its tools entirely |
-| No expense/holiday info in prompt | Agent says "I don't know" instead of looking it up |
-| Vague "competitive benefits" | Agent deflects or hallucinates benefit details |
-| No date handling guidance | Agent cannot resolve "next Friday" |
-
-The tools themselves have all the data. The flaw is that the prompt
-discourages the agent from using them.
 
 ### Step-by-Step
 
