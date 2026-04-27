@@ -197,6 +197,8 @@ Options:
   --agent-config F   Path to agent's config.json
                      (default: config.json)
   --cycles N         Run N improvement cycles (default: 1)
+  --no-auto          Always run all N cycles even if 100%
+                     meaningful (default: stop early)
   --eval-only        Only run evaluation (Steps 1-3), skip improvement
   --app-name X       Override agent app name for BQ filtering
   --traffic-count N  Number of synthetic questions per cycle (default: 10)
@@ -207,7 +209,7 @@ You can run again with multiple cycles to see iterative refinement:
 ```shell
 ./run_cycle.sh --cycles 3
 ```
-Each cycle generates fresh traffic, evaluates, improves, and measures. The golden eval set grows with each cycle as new edge cases are discovered.
+By default, the cycle stops early once all synthetic traffic scores 100% meaningful. Each cycle generates fresh traffic, evaluates, improves, and measures. The golden eval set grows with each cycle as new edge cases are discovered.
 
 ---
 

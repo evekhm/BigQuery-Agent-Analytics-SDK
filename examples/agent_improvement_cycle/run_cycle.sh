@@ -57,6 +57,7 @@ CYCLES=1
 EVAL_ONLY=false
 TRAFFIC_COUNT=10
 AGENT_CONFIG=""
+AUTO_CONTINUE=true
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -82,6 +83,10 @@ while [[ $# -gt 0 ]]; do
       TRAFFIC_COUNT="$2"
       shift 2
       ;;
+    --no-auto)
+      AUTO_CONTINUE=false
+      shift
+      ;;
     -h|--help)
       echo "Usage: $0 [OPTIONS]"
       echo ""
@@ -89,6 +94,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --agent-config F   Path to agent's config.json"
       echo "                     (default: config.json)"
       echo "  --cycles N         Run N improvement cycles (default: 1)"
+      echo "  --no-auto          Always run all N cycles even if 100%"
+      echo "                     meaningful (default: stop early)"
       echo "  --eval-only        Only run evaluation (Steps 1-3), skip improvement"
       echo "  --app-name X       Override agent app name for BQ filtering"
       echo "  --traffic-count N  Number of synthetic questions per cycle (default: 10)"
@@ -606,6 +613,19 @@ print(len(missing))
 
   echo ""
   echo "  Cycle $cycle complete."
+
+  # Auto-continue: stop early if 100% meaningful
+  if [[ "$AUTO_CONTINUE" == "true" ]]; then
+    A_UNHELPFUL=$(jq -r '.summary.unhelpful // 0' "$FRESH_REPORT")
+    A_PARTIAL=$(jq -r '.summary.partial // 0' "$FRESH_REPORT")
+    if [[ "$A_UNHELPFUL" == "0" && "$A_PARTIAL" == "0" ]]; then
+      echo ""
+      echo "  All sessions meaningful — stopping auto-continue."
+      break
+    elif [[ $cycle -lt $CYCLES ]]; then
+      echo "  ${A_UNHELPFUL} unhelpful + ${A_PARTIAL} partial remain — continuing to cycle $((cycle + 1))..."
+    fi
+  fi
 done
 
 # ---------------------------------------------------------------------------

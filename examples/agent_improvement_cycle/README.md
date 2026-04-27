@@ -136,7 +136,9 @@ before/after comparison to verify the improved prompt didn't regress
 on cost or performance. No extra agent runs — just math on the session
 data already in BigQuery.
 
-Run multiple cycles with `--cycles N` to iterate until performance stabilizes.
+Run multiple cycles with `--cycles N`. By default, the cycle stops
+early once all synthetic traffic scores 100% meaningful. Use
+`--no-auto` to force all N cycles to run regardless.
 
 The hero moment: quality typically climbs from ~40% to ~100% in a single cycle
 (results vary due to non-deterministic LLM output).
@@ -488,8 +490,11 @@ git tracking.
 # Single improvement cycle
 ./run_cycle.sh
 
-# Full demo: 3 cycles, watch the score climb from ~40% to ~100%
+# Up to 3 cycles, stops early when 100% meaningful (default behavior)
 ./run_cycle.sh --cycles 3
+
+# Force all 3 cycles even if 100% is reached early
+./run_cycle.sh --cycles 3 --no-auto
 
 # Eval only (no improvement step)
 ./run_cycle.sh --eval-only
