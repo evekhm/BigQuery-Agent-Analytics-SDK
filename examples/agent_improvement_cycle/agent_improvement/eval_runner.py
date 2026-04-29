@@ -180,9 +180,13 @@ class EvalRunner:
     agent = self._agent_factory(prompt)
     runner = InMemoryRunner(agent=agent, app_name="eval_agent")
 
+    # Limit concurrent LLM calls to avoid 429 rate-limit errors.
+    semaphore = asyncio.Semaphore(5)
+
     async def _eval_one(case: dict) -> dict:
-      result = await self.run_single_case(runner, case, user_id="eval")
-      result = await self.judge_case(case, result)
+      async with semaphore:
+        result = await self.run_single_case(runner, case, user_id="eval")
+        result = await self.judge_case(case, result)
       tag = "PASS" if result["pass"] else "FAIL"
       tools_called = ", ".join(result.get("tools_called", [])) or "none"
       expected_tool = case.get("expected_tool", "unknown")

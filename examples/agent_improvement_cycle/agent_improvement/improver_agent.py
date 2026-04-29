@@ -189,6 +189,9 @@ async def _generate_ground_truth(
   same tools as the target agent, so its answers are grounded in
   real tool output.
 
+  Limits concurrency to avoid 429 rate-limit errors when many
+  sessions are processed.
+
   Returns a list of dicts with ``question``, ``bad_response``, and
   ``ground_truth`` keys.
   """
@@ -206,30 +209,41 @@ async def _generate_ground_truth(
     teacher_agent = config.agent_factory(teacher_prompt)
   runner = InMemoryRunner(agent=teacher_agent, app_name="teacher_agent")
 
-  async def _get_answer(session: dict) -> dict:
-    question = session.get("question", "")
-    sess = await runner.session_service.create_session(
-        app_name="teacher_agent", user_id="teacher"
-    )
-    msg = Content(role="user", parts=[Part(text=question)])
-    answer = ""
-    async for event in runner.run_async(
-        user_id="teacher", session_id=sess.id, new_message=msg
-    ):
-      if event.content and event.content.parts:
-        for part in event.content.parts:
-          if part.text:
-            answer += part.text
-    return {
-        "question": question,
-        "bad_response": session.get("response", "")[:500],
-        "ground_truth": answer,
-    }
+  # Limit concurrent LLM calls to avoid hitting Vertex AI rate limits.
+  semaphore = asyncio.Semaphore(5)
 
-  results = list(
-      await asyncio.gather(*[_get_answer(s) for s in failed_sessions])
+  async def _get_answer(session: dict) -> dict | None:
+    question = session.get("question", "")
+    async with semaphore:
+      try:
+        sess = await runner.session_service.create_session(
+            app_name="teacher_agent", user_id="teacher"
+        )
+        msg = Content(role="user", parts=[Part(text=question)])
+        answer = ""
+        async for event in runner.run_async(
+            user_id="teacher", session_id=sess.id, new_message=msg
+        ):
+          if event.content and event.content.parts:
+            for part in event.content.parts:
+              if part.text:
+                answer += part.text
+        return {
+            "question": question,
+            "bad_response": session.get("response", "")[:500],
+            "ground_truth": answer,
+        }
+      except Exception as e:
+        logging.warning(
+            "Teacher agent failed for question '%.80s': %s",
+            question, e,
+        )
+        return None
+
+  results = await asyncio.gather(
+      *[_get_answer(s) for s in failed_sessions]
   )
-  return [r for r in results if r["ground_truth"].strip()]
+  return [r for r in results if r and r["ground_truth"].strip()]
 
 
 async def _generate_via_vertex_optimizer(
