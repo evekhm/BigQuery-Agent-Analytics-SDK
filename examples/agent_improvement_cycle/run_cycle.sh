@@ -245,9 +245,9 @@ if [[ $PREFLIGHT_EXIT -ne 0 ]]; then
   FAILING_V=$(_read_version)
   echo ""
   echo "  ┌─────────────────────────────────────────────────────────────┐"
-  echo "  │  WARNING: Prompt V${FAILING_V} does not pass all golden eval cases.  │"
-  echo "  │  The baseline will be auto-improved before the cycle runs. │"
-  echo "  │  Use ./reset.sh to restore the original V1 prompt.        │"
+  echo "  │  WARNING: Prompt V${FAILING_V} does not pass all golden eval cases.    │"
+  echo "  │  The baseline will be auto-improved before the cycle runs.  │"
+  echo "  │  Use ./reset.sh to restore the original V1 prompt.          │"
   echo "  └─────────────────────────────────────────────────────────────┘"
   echo ""
 
