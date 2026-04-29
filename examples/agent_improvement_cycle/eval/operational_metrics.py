@@ -66,7 +66,7 @@ METRICS = {
         "unit": "tokens",
         "label": "Total tokens",
     },
-    "turn_count": {"threshold": 10, "unit": "turns", "label": "Turn count"},
+    "turn_count": {"threshold": 10, "unit": "turns", "label": "Turn count", "fmt": "int"},
     "error_rate": {
         "threshold": 0.1,
         "unit": "rate",
@@ -165,7 +165,8 @@ def print_baseline(metrics: dict, label: str):
     else:
       status = "PASS"
 
-    v_str = f"{val} {unit}" if isinstance(val, (int, float)) else str(val)
+    fmt_val = int(val) if cfg.get("fmt") == "int" and isinstance(val, (int, float)) else val
+    v_str = f"{fmt_val} {unit}" if isinstance(val, (int, float)) else str(val)
     t_str = f"{threshold} {unit}"
     print(f"  {cfg['label']:<18}  {v_str:>14}  {t_str:>14}  {status:>8}")
 
@@ -206,8 +207,11 @@ def print_comparison(
     if status == "WARN":
       all_pass = False
 
-    b_str = f"{b_val} {unit}" if isinstance(b_val, (int, float)) else str(b_val)
-    a_str = f"{a_val} {unit}" if isinstance(a_val, (int, float)) else str(a_val)
+    is_int = cfg.get("fmt") == "int"
+    fmt_b = int(b_val) if is_int and isinstance(b_val, (int, float)) else b_val
+    fmt_a = int(a_val) if is_int and isinstance(a_val, (int, float)) else a_val
+    b_str = f"{fmt_b} {unit}" if isinstance(b_val, (int, float)) else str(b_val)
+    a_str = f"{fmt_a} {unit}" if isinstance(a_val, (int, float)) else str(a_val)
     t_str = f"{threshold} {unit}"
 
     print(
