@@ -575,14 +575,27 @@ def _classify_question(question: str, tools: list) -> tuple[str, str]:
   return "unknown", "unknown"
 
 
-def extract_failed_cases(report: dict, tools: list | None = None) -> list[dict]:
+def extract_failed_cases(
+    report: dict,
+    tools: list | None = None,
+    max_failure_extract: int | str | None = None,
+) -> list[dict]:
   """Extract failed sessions as new golden eval cases.
 
   Classifies each question against available tools to infer
   category and expected_tool. Questions that don't match any
   tool topic are still extracted with category="unknown".
+
+  Args:
+      report: Quality report dict with sessions.
+      tools: Agent tool functions for classification.
+      max_failure_extract: Controls how many failures to extract.
+          None or "all" extracts everything (default).
+          "auto" uses two-tier selection: one per category
+          first, then fills proportionally up to 2x categories.
+          An integer sets a hard cap with category-aware selection.
   """
-  new_cases = []
+  all_cases = []
   for session in report.get("sessions", []):
     cat = (
         session.get("metrics", {})
@@ -601,7 +614,7 @@ def extract_failed_cases(report: dict, tools: list | None = None) -> list[dict]:
     case_id = re.sub(r"[^a-z0-9]+", "_", question.lower().strip())[:40]
     case_id = f"extracted_{case_id.strip('_')}"
 
-    new_cases.append(
+    all_cases.append(
         {
             "id": case_id,
             "question": question,
@@ -610,7 +623,53 @@ def extract_failed_cases(report: dict, tools: list | None = None) -> list[dict]:
             "notes": f"Extracted from failed synthetic traffic ({cat})",
         }
     )
-  return new_cases
+
+  if not all_cases:
+    return all_cases
+
+  # Apply extraction limit
+  if max_failure_extract is None or max_failure_extract == "all":
+    return all_cases
+
+  # Two-tier category-aware selection
+  if max_failure_extract == "auto":
+    categories = {c["category"] for c in all_cases}
+    budget = 2 * len(categories)
+  else:
+    budget = int(max_failure_extract)
+
+  if len(all_cases) <= budget:
+    return all_cases
+
+  # Tier 1: one case per category (breadth)
+  by_category: dict[str, list[dict]] = {}
+  for case in all_cases:
+    by_category.setdefault(case["category"], []).append(case)
+
+  selected = []
+  for cat_cases in by_category.values():
+    selected.append(cat_cases[0])
+
+  if len(selected) >= budget:
+    return selected[:budget]
+
+  # Tier 2: fill remaining slots proportionally from heaviest categories
+  remaining_budget = budget - len(selected)
+  selected_ids = {c["id"] for c in selected}
+
+  # Sort categories by failure count (descending) for proportional fill
+  sorted_cats = sorted(by_category.keys(),
+                       key=lambda k: len(by_category[k]), reverse=True)
+
+  # Round-robin across categories, heaviest first
+  tier2_pool = []
+  for cat in sorted_cats:
+    for case in by_category[cat]:
+      if case["id"] not in selected_ids:
+        tier2_pool.append(case)
+
+  selected.extend(tier2_pool[:remaining_budget])
+  return selected
 
 
 def add_eval_cases(eval_cases_path: str, new_cases: list[dict]) -> int:
@@ -752,7 +811,7 @@ def create_improver_agent(
   return LoopAgent(
       name="prompt_improver",
       sub_agents=[inner_agent],
-      max_iterations=config.max_attempts,
+      max_iterations=config.optimizer_max_iterations,
   )
 
 
@@ -837,7 +896,9 @@ async def run_improvement(
     }
 
   # Extract failed cases into golden set FIRST
-  failed_cases = extract_failed_cases(report, tools=config.agent_tools)
+  failed_cases = extract_failed_cases(
+      report, tools=config.agent_tools, max_failure_extract=config.max_failure_extract
+  )
   if failed_cases:
     added = add_eval_cases(config.eval_cases_path, failed_cases)
     with open(config.eval_cases_path) as f:

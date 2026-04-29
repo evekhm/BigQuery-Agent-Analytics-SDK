@@ -40,8 +40,9 @@ class ImprovementConfig:
           (e.g. a ``prompts.py`` file).
       eval_cases_path: Path to the golden eval set JSON file.
       model_id: Gemini model used by the improver and judge LLMs.
-      max_attempts: Maximum number of candidate prompts to try before
-          giving up.
+      optimizer_max_iterations: Maximum number of prompt optimizer
+          iterations per improvement step (Vertex AI Prompt Optimizer
+          retry budget).
       quality_threshold: Fraction of golden cases that must pass
           (1.0 = all cases).
       teacher_model_id: Optional Gemini model for the teacher agent that
@@ -63,9 +64,10 @@ class ImprovementConfig:
   prompt_adapter: PromptAdapter
   eval_cases_path: str
   model_id: str = "gemini-2.5-flash"
-  max_attempts: int = 3
+  optimizer_max_iterations: int = 3
   quality_threshold: float = 1.0
   judge_prompt: str | None = None
   teacher_model_id: str | None = None
   use_vertex_optimizer: bool = False
   vertex_location: str = "us-central1"
+  max_failure_extract: int | str | None = None

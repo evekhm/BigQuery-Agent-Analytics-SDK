@@ -146,9 +146,10 @@ def load_config(config_path: str) -> ImprovementConfig:
       prompt_adapter=_build_prompt_adapter(cfg),
       eval_cases_path=cfg["eval_cases_path"],
       model_id=cfg.get("model_id", "gemini-2.5-flash"),
-      max_attempts=cfg.get("max_attempts", 3),
+      optimizer_max_iterations=cfg.get("optimizer_max_iterations", cfg.get("max_attempts", 3)),
       judge_prompt=cfg.get("judge_prompt"),
       teacher_model_id=cfg.get("teacher_model_id"),
       use_vertex_optimizer=cfg.get("use_vertex_optimizer", False),
       vertex_location=cfg.get("vertex_location", "us-central1"),
+      max_failure_extract=cfg.get("max_failure_extract", cfg.get("max_extract")),
   )

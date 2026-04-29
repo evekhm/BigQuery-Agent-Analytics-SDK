@@ -217,7 +217,7 @@ All agent-specific settings live in a single declarative config file:
   "eval_cases_path": "eval/eval_cases.json",
   "traffic_generator": "eval/generate_traffic.py",
   "model_id": "gemini-2.5-flash",
-  "max_attempts": 3,
+  "optimizer_max_iterations": 3,
   "prompt_storage": "vertex",
   "vertex_prompt_id": "1234567890",
   "use_vertex_optimizer": true,
@@ -446,12 +446,43 @@ BigQuery from Steps 2 and 5; no additional agent runs are needed. See
 - **Golden eval gate**: Candidate prompts must pass ALL golden cases.
   Rejected if any fail, retried up to 3 times.
 - **Eval case extraction**: Failed synthetic cases are added to the
-  golden set before improvement, raising the bar each cycle.
+  golden set before improvement, raising the bar each cycle. The
+  `max_failure_extract` config controls how many cases are extracted (see
+  [Scaling extraction](#scaling-extraction) below).
 - **Question deduplication**: Extracted cases are deduplicated by both
   ID and question text.
 - **Length check**: Prompts shorter than 50 characters are rejected.
 - **Retry with backoff**: Quality report step retries for BigQuery
   write propagation delays.
+
+### Scaling extraction
+
+At the default traffic volume (N=10), the system typically discovers
+3-5 failures, all of which are extracted into the golden eval set.
+The regression gate (3 original + 3-5 extracted = ~8 cases) is
+manageable for the optimizer to satisfy in one pass.
+
+At higher volumes (`--traffic-count 100`), the system discovers
+30-43 failures. Extracting all of them creates a regression gate of
+40+ cases, which is often too strict for the optimizer to satisfy
+in a single attempt. Many of these failures are redundant — 15
+might be "benefits" questions that all fail the same way.
+
+The `max_failure_extract` config field controls this:
+
+| Value | Behavior |
+|-------|----------|
+| `null` (default) | Extract **all** failures — every unhelpful or partial session becomes a golden eval case. This is the right choice for the small-N demo (N=10) where there are only 3-5 failures. At higher traffic volumes it can overwhelm the optimizer (see below). |
+| `"auto"` | Two-tier category-aware selection. Tier 1: one failure per category (breadth). Tier 2: fill proportionally from heaviest categories. Budget = 2 × number of failing categories. For 6 categories, that's ~12 cases. |
+| Integer (e.g. `10`) | Hard cap with category-aware selection. Same two-tier logic. |
+
+Example config for high-traffic runs:
+
+```json
+{
+  "max_failure_extract": "auto"
+}
+```
 
 ## Quick Start
 
@@ -569,13 +600,14 @@ agent:
 | `eval_cases_path` | required | Path to golden eval set JSON |
 | `traffic_generator` | required | Path to traffic generation script |
 | `model_id` | `gemini-2.5-flash` | Gemini model for agent and judge |
-| `max_attempts` | `3` | Max prompt improvement attempts per cycle |
+| `optimizer_max_iterations` | `3` | Max Vertex AI Prompt Optimizer iterations per improvement step |
 | `prompt_storage` | `python_file` | `vertex` or `python_file` |
 | `vertex_prompt_id` | `""` | Vertex AI prompt ID (auto-filled by setup) |
 | `vertex_project` | from `gcloud` | GCP project for Vertex AI (defaults to env) |
 | `vertex_location` | `us-central1` | Vertex AI region |
 | `use_vertex_optimizer` | `false` | Use Vertex AI Prompt Optimizer |
 | `teacher_model_id` | `null` | Model for teacher agent (null = same as `model_id`) |
+| `max_failure_extract` | `null` | Max failed cases to extract per cycle. `null` = extract **all** failures (best for the small-N demo where N<=20). `"auto"` = two-tier category-aware selection (~2x categories). Integer = hard cap with category-aware selection. See [Scaling extraction](#scaling-extraction). |
 
 ### Environment variables (.env)
 
@@ -599,7 +631,7 @@ Gemini calls; a 3-cycle run uses ~200-300.
 **Golden eval set growth:** The golden eval set grows each cycle as
 failed synthetic cases are extracted into it. Each improvement attempt
 validates the candidate prompt against the full golden set (N agent
-calls + N judge calls per attempt, up to `max_attempts` retries).
+calls + N judge calls per attempt, up to `optimizer_max_iterations` retries).
 After several cycles, the golden set can reach 20+ cases, increasing
 both cost and runtime of the validation step. For long-running
 deployments, consider periodically pruning redundant golden cases.

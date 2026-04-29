@@ -7,8 +7,9 @@
   "eval_cases_path": "eval/eval_cases.json",
   "traffic_generator": "eval/generate_traffic.py",
   "model_id": "gemini-2.5-flash",
-  "max_attempts": 3,
+  "optimizer_max_iterations": 3,
   "prompt_storage": "vertex",
   "vertex_prompt_id": "",
-  "use_vertex_optimizer": true
+  "use_vertex_optimizer": true,
+  "max_failure_extract": "auto"
 }
