@@ -181,13 +181,16 @@ _show_prompt() {
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Timestamp prefix for log lines
+ts() { date "+%H:%M:%S"; }
+
 # Timer: call step_start before a step, step_end after.
 step_start() { STEP_START_TIME=$(date +%s); }
 step_end() {
   local elapsed=$(( $(date +%s) - STEP_START_TIME ))
   local label="${1:-Step}"
   echo ""
-  echo "  Done. ${label} completed in ${elapsed}s."
+  echo "[$(ts)] Done. ${label} completed in ${elapsed}s."
 }
 
 separator() {
@@ -231,7 +234,7 @@ echo ""
 
 separator
 echo ""
-echo "  PRE-FLIGHT: Verifying golden eval set passes with current prompt"
+echo "[$(ts)] PRE-FLIGHT: Verifying golden eval set passes with current prompt"
 echo ""
 step_start
 
@@ -284,7 +287,7 @@ for cycle in $(seq 1 "$CYCLES"); do
 
   separator
   echo ""
-  echo "  CYCLE $cycle OF $CYCLES"
+  echo "[$(ts)] CYCLE $cycle OF $CYCLES"
 
   # Get current prompt version
   CURRENT_V=$(_read_version)
@@ -294,7 +297,7 @@ for cycle in $(seq 1 "$CYCLES"); do
   # =========================================================================
   separator
   echo ""
-  echo "  STEP 1/$TOTAL_STEPS: GENERATE SYNTHETIC TRAFFIC"
+  echo "[$(ts)] STEP 1/$TOTAL_STEPS: GENERATE SYNTHETIC TRAFFIC"
   echo ""
   echo "  Goal:    Produce diverse user questions that differ from the golden eval set"
   echo "  Method:  Gemini generates $TRAFFIC_COUNT questions"
@@ -322,7 +325,7 @@ for cycle in $(seq 1 "$CYCLES"); do
   # =========================================================================
   separator
   echo ""
-  echo "  STEP 2/$TOTAL_STEPS: RUN TRAFFIC THROUGH AGENT"
+  echo "[$(ts)] STEP 2/$TOTAL_STEPS: RUN TRAFFIC THROUGH AGENT"
   echo ""
   echo "  Goal:    Send questions to the agent, log every session to BigQuery"
   echo "  Prompt:  V${CURRENT_V} (current)"
@@ -356,7 +359,7 @@ for cycle in $(seq 1 "$CYCLES"); do
   # =========================================================================
   separator
   echo ""
-  echo "  STEP 3/$TOTAL_STEPS: EVALUATE SESSION QUALITY"
+  echo "[$(ts)] STEP 3/$TOTAL_STEPS: EVALUATE SESSION QUALITY"
   echo ""
   echo "  Goal:    Score each logged session from BigQuery"
   echo "  Method:  SDK quality_report.py reads sessions, LLM judges each one"
@@ -369,15 +372,18 @@ for cycle in $(seq 1 "$CYCLES"); do
   rm -f "$REPORT_JSON"
 
   # Retry with backoff for BigQuery streaming buffer propagation.
-  echo "  Waiting 15s for BigQuery streaming buffer to flush..."
+  echo "[$(ts)] Waiting 15s for BigQuery streaming buffer to flush..."
   echo ""
 #  echo "  While we wait, here are the questions that were sent to the agent:"
 #  jq -r '.eval_cases[] | "    [\(.id)] \(.question)"' "$TRAFFIC_JSON" 2>/dev/null || true
 #  echo ""
+  # The LLM judge scores each session individually (2 LLM calls per
+  # session: usefulness + grounding). At N=100 this takes 3-5 minutes.
+  # No output is printed until scoring completes — this is normal.
   MAX_RETRIES=6
   for attempt in $(seq 1 "$MAX_RETRIES"); do
     sleep 15
-    echo "  Querying BigQuery and scoring sessions with LLM judge..."
+    echo "[$(ts)] Scoring $ACTUAL_TRAFFIC_COUNT sessions with LLM judge (this may take a few minutes)..."
     $PY "$REPO_ROOT/scripts/quality_report.py" \
       --app-name "$APP_NAME" \
       --output-json "$REPORT_JSON" \
@@ -451,7 +457,7 @@ print(len(missing))
 
   separator
   echo ""
-  echo "  STEP 4/$TOTAL_STEPS: IMPROVE PROMPT"
+  echo "[$(ts)] STEP 4/$TOTAL_STEPS: IMPROVE PROMPT"
   echo ""
   echo "  Goal:    Fix the prompt to address failed sessions"
   echo "  Method:  1. Extract failed cases into golden eval set"
@@ -491,7 +497,7 @@ print(len(missing))
   # =========================================================================
   separator
   echo ""
-  echo "  STEP 5/$TOTAL_STEPS: MEASURE IMPROVEMENT"
+  echo "[$(ts)] STEP 5/$TOTAL_STEPS: MEASURE IMPROVEMENT"
   echo ""
   echo "  Goal:    Measure quality on fresh, unseen traffic via BigQuery"
   echo "  Method:  1. Generate fresh synthetic traffic (different from Step 1)"
@@ -533,16 +539,19 @@ print(len(missing))
   rm -f "$FRESH_REPORT"
 
   echo ""
-  echo "  Waiting 30s for BigQuery streaming buffer to flush..."
+  echo "[$(ts)] Waiting 30s for BigQuery streaming buffer to flush..."
   echo ""
   echo "  While we wait, here is the current golden eval set ($GOLDEN_AFTER cases):"
   jq -r '.eval_cases[] | "    [\(.id)] \(.question) (\(.category // "general"))"' "$EVAL_CASES_PATH" 2>/dev/null || true
   echo ""
 
+  # The LLM judge scores each session individually (2 LLM calls per
+  # session: usefulness + grounding). At N=100 this takes 3-5 minutes.
+  # No output is printed until scoring completes — this is normal.
   MAX_RETRIES=6
   for attempt in $(seq 1 "$MAX_RETRIES"); do
     sleep 30
-    echo "  Querying BigQuery and scoring sessions with LLM judge..."
+    echo "[$(ts)] Scoring $ACTUAL_FRESH_COUNT fresh sessions with LLM judge (this may take a few minutes)..."
     $PY "$REPO_ROOT/scripts/quality_report.py" \
       --app-name "$APP_NAME" \
       --output-json "$FRESH_REPORT" \

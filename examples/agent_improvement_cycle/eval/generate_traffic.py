@@ -23,8 +23,17 @@ has not been specifically tuned for.
 
 import argparse
 import json
+import logging
 import os
 import sys
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_DEMO_DIR = os.path.dirname(_SCRIPT_DIR)
+sys.path.insert(0, _DEMO_DIR)
+
+import agent_improvement  # noqa: F401 -- configures logging
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 from google import genai
@@ -32,9 +41,6 @@ import google.auth
 from google.genai.types import GenerateContentConfig
 from google.genai.types import HttpOptions
 from google.genai.types import HttpRetryOptions
-
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_DEMO_DIR = os.path.dirname(_SCRIPT_DIR)
 
 # Load environment
 _env_path = os.path.join(_DEMO_DIR, ".env")
@@ -142,17 +148,20 @@ def generate_traffic(count: int = 10) -> list[dict]:
 
       if len(cases) < count // 2:
         if attempt < 2:
-          print(
-              f"  Only got {len(cases)} cases (wanted {count}),"
-              f" retrying ({attempt + 1}/3)..."
+          logger.warning(
+              "Only got %d cases (wanted %d), retrying (%d/3)...",
+              len(cases),
+              count,
+              attempt + 1,
           )
           continue
       # Gemini may return more cases than requested; truncate to count.
       return cases[:count]
     except json.JSONDecodeError:
       if attempt < 2:
-        print(
-            f"  Gemini returned malformed JSON, retrying ({attempt + 1}/3)..."
+        logger.warning(
+            "Gemini returned malformed JSON, retrying (%d/3)...",
+            attempt + 1,
         )
       else:
         raise
@@ -182,9 +191,9 @@ def main() -> None:
   )
   os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-  print(f"\n  Generating {args.count} synthetic traffic cases...")
+  logger.info("Generating %d synthetic traffic cases...", args.count)
   cases = generate_traffic(count=args.count)
-  print(f"  Generated {len(cases)} cases.")
+  logger.info("Generated %d cases.", len(cases))
 
   # Wrap in the same format as eval_cases.json so run_eval.py can consume it
   output = {
@@ -198,7 +207,7 @@ def main() -> None:
     json.dump(output, f, indent=2)
     f.write("\n")
 
-  print(f"  Written to {output_path}")
+  logger.info("Written to %s", output_path)
 
 
 if __name__ == "__main__":

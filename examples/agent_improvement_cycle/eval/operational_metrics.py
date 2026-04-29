@@ -33,11 +33,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+_DEMO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+sys.path.insert(0, _DEMO_DIR)
+
+import agent_improvement  # noqa: F401 -- configures logging
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 
@@ -66,7 +74,12 @@ METRICS = {
         "unit": "tokens",
         "label": "Total tokens",
     },
-    "turn_count": {"threshold": 10, "unit": "turns", "label": "Turn count", "fmt": "int"},
+    "turn_count": {
+        "threshold": 10,
+        "unit": "turns",
+        "label": "Turn count",
+        "fmt": "int",
+    },
     "error_rate": {
         "threshold": 0.1,
         "unit": "rate",
@@ -220,9 +233,9 @@ def print_comparison(
 
   print("")
   if all_pass:
-    print("  All operational metrics within budget.")
+    logger.info("All operational metrics within budget.")
   else:
-    print("  Some metrics exceeded budget. Review thresholds.")
+    logger.warning("Some metrics exceeded budget. Review thresholds.")
   print("")
   return all_pass
 
@@ -267,7 +280,7 @@ def main():
       print(f"  No session IDs found in {args.sessions}", file=sys.stderr)
       sys.exit(1)
 
-    print(f"  Evaluating {len(ids)} {args.label} sessions...")
+    logger.info("Evaluating %d %s sessions...", len(ids), args.label)
     results = run_metrics(ids)
     print_baseline(results, args.label)
 
@@ -275,7 +288,7 @@ def main():
       output = {"label": args.label, "sessions": len(ids), "metrics": results}
       with open(args.output, "w") as f:
         json.dump(output, f, indent=2, default=str)
-      print(f"  Saved to: {args.output}")
+      logger.info("Saved to: %s", args.output)
     sys.exit(0)
 
   # Comparison mode: before/after
@@ -294,8 +307,12 @@ def main():
     print(f"  No session IDs found in {args.after_sessions}", file=sys.stderr)
     sys.exit(1)
 
-  print(
-      f"  Evaluating {len(before_ids)} {args.before_label} sessions and {len(after_ids)} {args.after_label} sessions..."
+  logger.info(
+      "Evaluating %d %s sessions and %d %s sessions...",
+      len(before_ids),
+      args.before_label,
+      len(after_ids),
+      args.after_label,
   )
 
   before_results = run_metrics(before_ids)
@@ -324,7 +341,7 @@ def main():
     }
     with open(args.output, "w") as f:
       json.dump(output, f, indent=2, default=str)
-    print(f"  Saved to: {args.output}")
+    logger.info("Saved to: %s", args.output)
 
   sys.exit(0 if all_pass else 1)
 

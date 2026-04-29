@@ -144,7 +144,7 @@ The agent uses its tools and gives direct, grounded answers. No more "contact HR
 Ten out of ten sessions scored as helpful and grounded — in a single cycle.
 
 And now the operational comparison — the same deterministic metrics we captured as a baseline in Step 3, run on the V2 sessions and shown side by side.
-Latency stayed flat or improved — the V2 prompt routes to tools directly instead of deliberating. Token usage is comparable. 
+Latency consistently drops with V2 — the V1 agent spends time deliberating before refusing, while V2 routes to tools immediately and responds. Token usage increases because V2 calls tools for every question instead of refusing some, but stays well within budget.
 Turn count unchanged. The improved prompt didn't trade quality for cost.
 
 

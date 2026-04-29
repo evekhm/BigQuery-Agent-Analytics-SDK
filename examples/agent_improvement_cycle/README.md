@@ -148,9 +148,11 @@ The hero moment: quality typically climbs from ~60% to ~100% in a single cycle
 (results vary due to non-deterministic LLM output). With the default
 N=10 traffic, the improvement step typically succeeds on the first
 optimizer attempt. At higher traffic volumes (`--traffic-count 100`),
-the system extracts more failure cases (30-43) into the golden eval
-set, making the regression gate stricter. Use `--auto --cycles 3`
-for higher-N runs to give the optimizer multiple cycles to converge.
+the system discovers more failures but `max_failure_extract: "auto"`
+applies category-aware selection to extract a representative subset
+(~12 cases from ~42 failures in a typical run), keeping the regression
+gate strict but manageable. Use `--auto --cycles 3` for higher-N runs
+to give the optimizer multiple cycles to converge if needed.
 
 ### Why This Matters
 

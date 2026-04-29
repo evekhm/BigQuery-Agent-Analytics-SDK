@@ -19,6 +19,16 @@ quality and iteratively rewrites its prompt until all golden eval
 cases pass.
 """
 
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+# Suppress noisy third-party loggers.
+logging.getLogger("google.genai").setLevel(logging.ERROR)
+
 from agent_improvement.config import ImprovementConfig
 from agent_improvement.config_loader import load_agent_module
 from agent_improvement.config_loader import load_config

@@ -28,12 +28,13 @@ import warnings
 
 warnings.filterwarnings("ignore")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="authlib")
-logging.getLogger("google.genai").setLevel(logging.ERROR)
 
 import asyncio
 import json
 import os
 import sys
+
+logger = logging.getLogger(__name__)
 
 from google.adk.runners import InMemoryRunner
 from google.genai.types import Content
@@ -101,7 +102,7 @@ async def run_all_cases(
   eval_path = eval_cases_path or cfg["eval_cases_path"]
 
   cases = load_eval_cases(eval_path)
-  print(f"\nRunning {len(cases)} cases...\n")
+  logger.info("Running %d cases...", len(cases))
 
   runner = InMemoryRunner(
       agent=mod.root_agent,
@@ -148,8 +149,8 @@ async def run_all_cases(
   )
   results = list(results)
 
-  print(f"\nCompleted {len(results)}/{len(cases)} cases.")
-  print("Sessions logged to BigQuery via telemetry plugin.")
+  logger.info("Completed %d/%d cases.", len(results), len(cases))
+  print("  Sessions logged to BigQuery via telemetry plugin.")
   return results
 
 
@@ -172,7 +173,7 @@ async def run_golden_eval(
 
   cases = eval_runner.load_eval_cases(eval_path)
   _, version = config.prompt_adapter.read_prompt()
-  print(f"\n  Evaluating {len(cases)} cases with prompt V{version}")
+  logger.info("Evaluating %d cases with prompt V%s", len(cases), version)
   print("  (LLM judge, no BigQuery logging)\n")
 
   prompt, _ = config.prompt_adapter.read_prompt()
@@ -181,7 +182,7 @@ async def run_golden_eval(
   )
 
   rate = round(100 * passed / total) if total else 0
-  print(f"\n  Result: {passed}/{total} passed ({rate}%)")
+  logger.info("Result: %d/%d passed (%d%%)", passed, total, rate)
   if all_passed:
     print("  All cases pass.")
   else:
@@ -239,7 +240,7 @@ def main() -> None:
   os.makedirs(os.path.dirname(results_path), exist_ok=True)
   with open(results_path, "w") as f:
     json.dump(results, f, indent=2)
-  print(f"Results saved to {results_path}")
+  logger.info("Results saved to %s", results_path)
 
   if failed:
     sys.exit(1)

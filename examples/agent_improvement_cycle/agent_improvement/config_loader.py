@@ -31,10 +31,13 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 import os
 import sys
 
 from agent_improvement.config import ImprovementConfig
+
+logger = logging.getLogger(__name__)
 from agent_improvement.prompt_adapter import PythonFilePromptAdapter
 from agent_improvement.prompt_adapter import VertexPromptAdapter
 
@@ -69,21 +72,24 @@ def load_agent_module(config_path: str) -> tuple:
 
   cfg = _resolve_paths(cfg, agent_root)
 
-  print(f"\n  Config: {config_path}")
-  print(f"  Agent module: {cfg['agent_module']}")
-  print(f"  Prompt storage: {cfg.get('prompt_storage', 'python_file')}")
+  logger.info("Config: %s", config_path)
+  logger.info("Agent module: %s", cfg["agent_module"])
+  logger.info("Prompt storage: %s", cfg.get("prompt_storage", "python_file"))
   if cfg.get("prompt_storage") == "vertex":
     prompt_id = cfg.get("vertex_prompt_id") or os.environ.get(
         "VERTEX_PROMPT_ID", ""
     )
-    print(f"  Vertex prompt ID: {prompt_id or '(not set)'}")
-    print(
-        f"  Vertex project: {cfg.get('vertex_project') or os.environ.get('PROJECT_ID', '(from gcloud default)')}"
+    logger.info("Vertex prompt ID: %s", prompt_id or "(not set)")
+    logger.info(
+        "Vertex project: %s",
+        cfg.get("vertex_project")
+        or os.environ.get("PROJECT_ID", "(from gcloud default)"),
     )
-    print(f"  Vertex location: {cfg.get('vertex_location', 'us-central1')}")
-  print(f"  Model: {cfg.get('model_id', 'gemini-2.5-flash')}")
-  print(f"  Eval cases: {cfg.get('eval_cases_path', '(not set)')}")
-  print()
+    logger.info(
+        "Vertex location: %s", cfg.get("vertex_location", "us-central1")
+    )
+  logger.info("Model: %s", cfg.get("model_id", "gemini-2.5-flash"))
+  logger.info("Eval cases: %s", cfg.get("eval_cases_path", "(not set)"))
 
   mod = _import_module(cfg["agent_module"], agent_root)
   return mod, cfg
@@ -146,10 +152,14 @@ def load_config(config_path: str) -> ImprovementConfig:
       prompt_adapter=_build_prompt_adapter(cfg),
       eval_cases_path=cfg["eval_cases_path"],
       model_id=cfg.get("model_id", "gemini-2.5-flash"),
-      optimizer_max_iterations=cfg.get("optimizer_max_iterations", cfg.get("max_attempts", 3)),
+      optimizer_max_iterations=cfg.get(
+          "optimizer_max_iterations", cfg.get("max_attempts", 3)
+      ),
       judge_prompt=cfg.get("judge_prompt"),
       teacher_model_id=cfg.get("teacher_model_id"),
       use_vertex_optimizer=cfg.get("use_vertex_optimizer", False),
       vertex_location=cfg.get("vertex_location", "us-central1"),
-      max_failure_extract=cfg.get("max_failure_extract", cfg.get("max_extract")),
+      max_failure_extract=cfg.get(
+          "max_failure_extract", cfg.get("max_extract")
+      ),
   )

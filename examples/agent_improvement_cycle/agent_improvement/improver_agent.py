@@ -33,7 +33,8 @@ import re
 import warnings
 
 warnings.filterwarnings("ignore")
-logging.getLogger("google.genai").setLevel(logging.ERROR)
+
+logger = logging.getLogger(__name__)
 
 from agent_improvement.config import ImprovementConfig
 from agent_improvement.eval_runner import EvalRunner
@@ -236,13 +237,12 @@ async def _generate_ground_truth(
       except Exception as e:
         logging.warning(
             "Teacher agent failed for question '%.80s': %s",
-            question, e,
+            question,
+            e,
         )
         return None
 
-  results = await asyncio.gather(
-      *[_get_answer(s) for s in failed_sessions]
-  )
+  results = await asyncio.gather(*[_get_answer(s) for s in failed_sessions])
   return [r for r in results if r and r["ground_truth"].strip()]
 
 
@@ -286,9 +286,9 @@ async def _generate_via_vertex_optimizer(
     )
 
   # Generate ground truth via teacher agent
-  print("  Generating synthetic ground truth via teacher agent...")
+  logger.info("Generating synthetic ground truth via teacher agent...")
   gt_results = await _generate_ground_truth(config, failed)
-  print(f"  Generated {len(gt_results)} ground truth answers.")
+  logger.info("Generated %d ground truth answers.", len(gt_results))
 
   # Save ground truth to reports/ for inspection
   gt_dir = os.path.join(
@@ -298,7 +298,7 @@ async def _generate_via_vertex_optimizer(
   gt_path = os.path.join(gt_dir, "ground_truth_latest.json")
   with open(gt_path, "w") as f:
     json.dump(gt_results, f, indent=2)
-  print(f"  Ground truth saved to {gt_path}")
+  logger.info("Ground truth saved to %s", gt_path)
   print("")
   print("  Agent (bad) vs Teacher (ground truth) comparison:")
   print("  " + "─" * 68)
@@ -348,11 +348,11 @@ async def _generate_via_vertex_optimizer(
   )
   prompt_with_tools = current_prompt + tool_use_directive
 
-  print(
-      f"  Calling Vertex AI Prompt Optimizer with {len(gt_results)} "
-      "ground truth examples..."
+  logger.info(
+      "Calling Vertex AI Prompt Optimizer with %d ground truth examples...",
+      len(gt_results),
   )
-  print("  (The optimizer is a server-side job — typically 2-4 minutes.)")
+  logger.info("(The optimizer is a server-side job — typically 2-4 minutes.)")
 
   from google.genai.types import HttpOptions
   from google.genai.types import HttpRetryOptions
@@ -378,7 +378,7 @@ async def _generate_via_vertex_optimizer(
     while True:
       await asyncio.sleep(15)
       elapsed += 15
-      print(f"  ... still optimizing ({elapsed}s elapsed)", flush=True)
+      logger.info("... still optimizing (%ds elapsed)", elapsed)
 
   progress_task = asyncio.create_task(_progress_indicator())
   try:
@@ -395,7 +395,7 @@ async def _generate_via_vertex_optimizer(
   finally:
     progress_task.cancel()
 
-  print("  Optimizer returned a candidate prompt.")
+  logger.info("Optimizer returned a candidate prompt.")
 
   parsed = result.parsed_response
   if (
@@ -474,9 +474,9 @@ async def test_candidate(candidate_prompt: str) -> str:
       cases_count = len(json.load(_f).get("eval_cases", []))
   except Exception:
     pass
-  print(
-      f"\n  Testing candidate prompt against {cases_count} golden eval "
-      "cases (regression gate)..."
+  logger.info(
+      "Testing candidate prompt against %d golden eval cases (regression gate)...",
+      cases_count,
   )
 
   eval_runner = EvalRunner(
@@ -672,8 +672,9 @@ def extract_failed_cases(
   selected_ids = {c["id"] for c in selected}
 
   # Sort categories by failure count (descending) for proportional fill
-  sorted_cats = sorted(by_category.keys(),
-                       key=lambda k: len(by_category[k]), reverse=True)
+  sorted_cats = sorted(
+      by_category.keys(), key=lambda k: len(by_category[k]), reverse=True
+  )
 
   # Round-robin across categories, heaviest first
   tier2_pool = []
@@ -892,7 +893,7 @@ async def run_improvement(
   print("")
 
   if report["summary"].get("total_sessions", 0) == 0:
-    print("  ERROR: Report has 0 sessions. Cannot improve.")
+    logger.error("Report has 0 sessions. Cannot improve.")
     return {
         "old_version": old_version,
         "new_version": old_version,
@@ -901,7 +902,7 @@ async def run_improvement(
     }
 
   if report["summary"]["meaningful_rate"] >= 95:
-    print("  Quality is already high (>=95%). No improvement needed.")
+    logger.info("Quality is already high (>=95%%). No improvement needed.")
     return {
         "old_version": old_version,
         "new_version": old_version,
@@ -911,18 +912,22 @@ async def run_improvement(
 
   # Extract failed cases into golden set FIRST
   failed_cases = extract_failed_cases(
-      report, tools=config.agent_tools, max_failure_extract=config.max_failure_extract
+      report,
+      tools=config.agent_tools,
+      max_failure_extract=config.max_failure_extract,
   )
   if failed_cases:
     added = add_eval_cases(config.eval_cases_path, failed_cases)
     with open(config.eval_cases_path) as f:
       golden_count = len(json.load(f).get("eval_cases", []))
-    print(
-        f"  Extracted {len(failed_cases)} failed cases, added"
-        f" {added} new to golden set ({golden_count} total)."
+    logger.info(
+        "Extracted %d failed cases, added %d new to golden set (%d total).",
+        len(failed_cases),
+        added,
+        golden_count,
     )
   else:
-    print("  No failed cases to extract.")
+    logger.info("No failed cases to extract.")
 
   # Narrow the report to only the extracted cases so the optimizer
   # generates ground truth for the same subset used in the golden
@@ -930,7 +935,8 @@ async def run_improvement(
   if failed_cases:
     extracted_questions = {c["question"] for c in failed_cases}
     report["sessions"] = [
-        s for s in report["sessions"]
+        s
+        for s in report["sessions"]
         if s.get("question", "") in extracted_questions
     ]
 
@@ -975,10 +981,10 @@ async def run_improvement(
     golden_count = len(json.load(f).get("eval_cases", []))
 
   if new_version > old_version:
-    print(f"\n  v{old_version} -> v{new_version} complete.")
+    logger.info("v%d -> v%d complete.", old_version, new_version)
   else:
-    print(
-        "\n  WARNING: No improvement was written. All candidates"
+    logger.warning(
+        "No improvement was written. All candidates"
         " may have failed regression tests."
     )
 
