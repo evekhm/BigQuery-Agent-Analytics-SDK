@@ -136,12 +136,21 @@ before/after comparison to verify the improved prompt didn't regress
 on cost or performance. No extra agent runs — just math on the session
 data already in BigQuery.
 
-Run multiple cycles with `--cycles N`. By default, the cycle stops
-early once all synthetic traffic scores 100% meaningful. Use
-`--no-auto` to force all N cycles to run regardless.
+By default, the script runs a **single cycle** and stops. This is the
+safe default -- each cycle makes dozens of Gemini API calls, and
+running multiple cycles unintentionally can lead to unexpected costs.
 
-The hero moment: quality typically climbs from ~40% to ~100% in a single cycle
-(results vary due to non-deterministic LLM output).
+To run multiple improvement cycles, use `--auto --cycles N`. The
+`--auto` flag enables auto-cycling, which runs up to N cycles and
+stops early once all synthetic traffic scores 100% meaningful.
+
+The hero moment: quality typically climbs from ~60% to ~100% in a single cycle
+(results vary due to non-deterministic LLM output). With the default
+N=10 traffic, the improvement step typically succeeds on the first
+optimizer attempt. At higher traffic volumes (`--traffic-count 100`),
+the system extracts more failure cases (30-43) into the golden eval
+set, making the regression gate stricter. Use `--auto --cycles 3`
+for higher-N runs to give the optimizer multiple cycles to converge.
 
 ### Why This Matters
 
@@ -487,24 +496,28 @@ git tracking.
 ### 3. Run the demo
 
 ```bash
-# Single improvement cycle
+# Single improvement cycle (default — safe for experimentation)
 ./run_cycle.sh
 
-# Up to 3 cycles, stops early when 100% meaningful (default behavior)
-./run_cycle.sh --cycles 3
+# Auto-cycle: run up to 3 cycles, stop early when 100% meaningful
+./run_cycle.sh --auto --cycles 3
 
-# Force all 3 cycles even if 100% is reached early
-./run_cycle.sh --cycles 3 --no-auto
+# Exactly 3 cycles (no early stopping)
+./run_cycle.sh --cycles 3
 
 # Eval only (no improvement step)
 ./run_cycle.sh --eval-only
 
 # Customize traffic volume
-./run_cycle.sh --cycles 3 --traffic-count 20
+./run_cycle.sh --auto --cycles 3 --traffic-count 20
 
 # Use a different agent's config
 ./run_cycle.sh --agent-config /path/to/other/config.json
 ```
+
+> **Cost note:** Each cycle makes ~50-80 Gemini API calls. Running
+> `./run_cycle.sh` with no flags is always safe (1 cycle). Use `--auto
+> --cycles N` only when you intentionally want multiple iterations.
 
 ### 4. Inspect results
 

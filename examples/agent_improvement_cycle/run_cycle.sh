@@ -26,9 +26,9 @@
 #   Step 5  Measure improvement         (fresh traffic + LLM judge)
 #
 # Usage:
-#   ./run_cycle.sh                                          # Demo agent
+#   ./run_cycle.sh                                          # Single cycle (default)
+#   ./run_cycle.sh --auto --cycles 3                        # Auto-cycle up to 3
 #   ./run_cycle.sh --agent-config /path/to/config.json      # Any agent
-#   ./run_cycle.sh --cycles 3                               # 3 cycles
 #   ./run_cycle.sh --eval-only                              # Steps 1-3 only
 # ============================================================================
 
@@ -57,7 +57,7 @@ CYCLES=1
 EVAL_ONLY=false
 TRAFFIC_COUNT=10
 AGENT_CONFIG=""
-AUTO_CONTINUE=true
+AUTO_CONTINUE=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -83,8 +83,8 @@ while [[ $# -gt 0 ]]; do
       TRAFFIC_COUNT="$2"
       shift 2
       ;;
-    --no-auto)
-      AUTO_CONTINUE=false
+    --auto)
+      AUTO_CONTINUE=true
       shift
       ;;
     -h|--help)
@@ -94,8 +94,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --agent-config F   Path to agent's config.json"
       echo "                     (default: config.json)"
       echo "  --cycles N         Run N improvement cycles (default: 1)"
-      echo "  --no-auto          Always run all N cycles even if 100%"
-      echo "                     meaningful (default: stop early)"
+      echo "  --auto             Enable auto-cycling: run up to N cycles,"
+      echo "                     stop early when 100% meaningful"
       echo "  --eval-only        Only run evaluation (Steps 1-3), skip improvement"
       echo "  --app-name X       Override agent app name for BQ filtering"
       echo "  --traffic-count N  Number of synthetic questions per cycle (default: 10)"
