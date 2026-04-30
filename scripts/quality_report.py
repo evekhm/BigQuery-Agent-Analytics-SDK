@@ -41,6 +41,7 @@ Usage:
     python quality_report.py --samples all        # show all sessions
     python quality_report.py --app-name my_agent  # filter to a specific agent
     python quality_report.py --output-json r.json # write structured JSON output
+    python quality_report.py --env path/to/.env   # load a specific .env file
 """
 import warnings
 
@@ -84,12 +85,23 @@ def _configure_logging():
       format="%(asctime)s [%(levelname)s] %(message)s",
       datefmt="%H:%M:%S",
   )
+  for _noisy in (
+      "google.genai", "google_genai",
+      "google.adk", "google_adk",
+      "google.auth", "google_auth",
+      "httpx", "httpcore",
+  ):
+    logging.getLogger(_noisy).setLevel(logging.ERROR)
 
 
-def _load_dotenv():
+def _load_dotenv(env_file=None):
   """Load .env file if present (optional convenience)."""
   try:
     from dotenv import load_dotenv
+
+    if env_file:
+      load_dotenv(env_file, override=True)
+      return
 
     for candidate in [
         os.path.join(_script_dir, ".env"),
@@ -161,8 +173,8 @@ def get_eval_metrics():
   response_usefulness = CategoricalMetricDefinition(
       name="response_usefulness",
       definition=(
-          "Whether the agent's final response provides a genuinely useful, "
-          "substantive answer to the user's question. A response that apologizes, "
+          "Whether the agent final response provides a genuinely useful, "
+          "substantive answer to the user question. A response that apologizes, "
           "says it cannot help, returns no data, provides only generic filler, "
           "or loops without resolving the question is NOT useful."
       ),
@@ -170,7 +182,7 @@ def get_eval_metrics():
           CategoricalMetricCategory(
               name="meaningful",
               definition=(
-                  "The response directly and substantively addresses the user's "
+                  "The response directly and substantively addresses the user "
                   "question with specific, actionable information."
               ),
           ),
@@ -178,9 +190,9 @@ def get_eval_metrics():
               name="unhelpful",
               definition=(
                   "The response technically succeeded (no error) but does NOT "
-                  "meaningfully answer the user's question. Examples: apologies, "
-                  "'I don't have that information', empty data results, generic "
-                  "filler text, or the agent looping without a resolution."
+                  "meaningfully answer the user question. Examples: apologies, "
+                  "saying I do not have that information, empty data results, "
+                  "generic filler text, or the agent looping without a resolution."
               ),
           ),
           CategoricalMetricCategory(
@@ -196,7 +208,7 @@ def get_eval_metrics():
   task_grounding = CategoricalMetricDefinition(
       name="task_grounding",
       definition=(
-          "Whether the agent's response is grounded in actual data retrieved "
+          "Whether the agent response is grounded in actual data retrieved "
           "from its tools, or is fabricated / hallucinated general knowledge."
       ),
       categories=[
@@ -204,13 +216,13 @@ def get_eval_metrics():
               name="grounded",
               definition=(
                   "The response is clearly based on data retrieved from the "
-                  "agent's tools (search results, database lookups, API calls)."
+                  "agent tools (search results, database lookups, API calls)."
               ),
           ),
           CategoricalMetricCategory(
               name="ungrounded",
               definition=(
-                  "The response appears to be fabricated or based on the LLM's "
+                  "The response appears to be fabricated or based on the LLM "
                   "general knowledge rather than actual tool results. The tool "
                   "may have returned empty data and the agent filled in anyway."
               ),
@@ -367,12 +379,14 @@ def run_evaluation(
     time_range=None, limit=100, model=None, persist=False, app_name=None,
     session_ids=None,
 ) -> dict:
-  from bigquery_agent_analytics import CategoricalEvaluationConfig, TraceFilter
+  from bigquery_agent_analytics import (
+      CategoricalEvaluationConfig, TraceFilter,
+  )
 
   model = model or EVAL_MODEL_ID
   client = get_client()
-
   metrics = get_eval_metrics()
+
   cat_config = CategoricalEvaluationConfig(
       metrics=metrics,
       endpoint=model,
@@ -1188,11 +1202,20 @@ Examples:
            "When set, only these sessions are evaluated — --limit and "
            "--time-period are ignored.",
   )
+  parser.add_argument(
+      "--env",
+      type=str,
+      default=None,
+      metavar="PATH",
+      help="Path to .env file to load (overrides default .env discovery). "
+           "Use this to point at a different agent's environment, e.g. "
+           "--env examples/agent_improvement_cycle/.env",
+  )
 
   args = parser.parse_args()
 
   _configure_logging()
-  _load_dotenv()
+  _load_dotenv(env_file=args.env)
   _load_config()
 
   if args.eval:

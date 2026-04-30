@@ -162,4 +162,5 @@ def load_config(config_path: str) -> ImprovementConfig:
       max_failure_extract=cfg.get(
           "max_failure_extract", cfg.get("max_extract")
       ),
+      quality_threshold=cfg.get("quality_threshold", 0.95),
   )

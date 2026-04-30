@@ -64,6 +64,12 @@ def main() -> None:
           " --golden) instead of a BigQuery quality report."
       ),
   )
+  parser.add_argument(
+      "--output-dir",
+      type=str,
+      default=None,
+      help="Directory for ground_truth_latest.json (default: <demo>/reports/)",
+  )
   args = parser.parse_args()
 
   config = load_config(args.agent_config)
@@ -72,6 +78,7 @@ def main() -> None:
           config,
           report_path=args.report_json,
           from_eval_results=args.from_eval_results,
+          output_dir=args.output_dir,
       )
   )
 

@@ -38,7 +38,7 @@ import os
 import sys
 import warnings
 
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore")
 
 _DEMO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, _DEMO_DIR)

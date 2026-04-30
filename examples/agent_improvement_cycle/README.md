@@ -142,7 +142,18 @@ running multiple cycles unintentionally can lead to unexpected costs.
 
 To run multiple improvement cycles, use `--auto --cycles N`. The
 `--auto` flag enables auto-cycling, which runs up to N cycles and
-stops early once all synthetic traffic scores 100% meaningful.
+stops early once quality meets the `quality_threshold` setting in
+`config.json` (default: `0.95`, i.e. 95% meaningful).
+
+**Why 95% and not 100%?** LLM output is non-deterministic. At N=100
+traffic, a single stochastic misfire causes a 1% drop. Setting the
+threshold to 100% leads to cycles that fight random variance rather
+than fix systematic gaps. The 95% default means: stop when real
+failures are gone, don't chase noise. If the improvement step finds
+quality already at or above the threshold, it skips the optimizer
+entirely and the cycle moves on. If no new prompt version is produced,
+the measurement step (Step 5) is also skipped -- there is nothing to
+compare.
 
 The hero moment: quality typically climbs from ~60% to ~100% in a single cycle
 (results vary due to non-deterministic LLM output). With the default
@@ -280,6 +291,17 @@ When the cycle identifies failed sessions, it uses the
 4. **Validate**: Test the optimized prompt against the full golden
    eval set before accepting it.
 
+The optimizer also receives the agent's **tool signatures**, auto-extracted
+from the Python functions by `tool_introspection.py` using `inspect` --
+function name, parameter types, and full docstrings. These are appended
+to the prompt as plain text so the optimizer knows what tools exist and
+what arguments they accept. This is how the V2 prompt ends up with
+explicit topic-to-tool mappings: the optimizer saw the tool's signature,
+saw the teacher successfully calling it with specific arguments, and
+generated routing instructions accordingly. If the optimizer's output
+strips the tool references (which it tends to do), they are
+re-appended automatically.
+
 This replaces raw "ask Gemini to rewrite the prompt" with a
 structured optimization pipeline backed by real failure data.
 
@@ -343,10 +365,10 @@ Failed sessions from quality report
   toward tool-grounded answers
 ```
 
-The teacher's answers are saved to `reports/ground_truth_latest.json`
-for inspection. Each entry contains the original question, the bad
-response from the target agent, and the teacher's ground truth
-answer.
+The teacher's answers are saved to
+`reports/run_YYYYMMDD_HHMMSS/ground_truth_latest.json` for inspection.
+Each entry contains the original question, the bad response from the
+target agent, and the teacher's ground truth answer.
 
 #### Why not just use the teacher prompt directly?
 
@@ -532,7 +554,7 @@ git tracking.
 # Single improvement cycle (default — safe for experimentation)
 ./run_cycle.sh
 
-# Auto-cycle: run up to 3 cycles, stop early when 100% meaningful
+# Auto-cycle: run up to 3 cycles, stop early when quality meets threshold (95%)
 ./run_cycle.sh --auto --cycles 3
 
 # Exactly 3 cycles (no early stopping)
@@ -544,24 +566,80 @@ git tracking.
 # Customize traffic volume
 ./run_cycle.sh --auto --cycles 3 --traffic-count 20
 
+# Scaled run (N=100)
+./run_cycle.sh --auto --cycles 5 --traffic-count 100
+
 # Use a different agent's config
 ./run_cycle.sh --agent-config /path/to/other/config.json
 ```
 
-> **Cost note:** Each cycle makes ~50-80 Gemini API calls. Running
-> `./run_cycle.sh` with no flags is always safe (1 cycle). Use `--auto
-> --cycles N` only when you intentionally want multiple iterations.
+The scaled run combines all the flags:
+
+| Flag | What it does |
+|------|--------------|
+| `--auto` | Stop early when quality meets `quality_threshold` (default 95%) |
+| `--cycles 5` | Run up to 5 improvement cycles |
+| `--traffic-count 100` | Generate 100 synthetic questions per cycle (default: 10) |
+
+All output is automatically logged to `reports/run_YYYYMMDD_HHMMSS/run.log`
+(ANSI colour codes stripped for readability). Each run gets its own
+timestamped subdirectory under `reports/`, so previous runs are preserved.
+
+> **Cost note:** Each cycle makes ~50-80 Gemini API calls (more with
+> higher `--traffic-count`). Running `./run_cycle.sh` with no flags is
+> always safe (1 cycle). Use `--auto --cycles N` only when you
+> intentionally want multiple iterations.
+
+#### Standalone quality report
+
+The `quality_report.sh` wrapper can be run independently. Use
+`--env` to point at the right `.env` file (otherwise it loads the
+repo root `.env` which may target a different dataset):
+
+```bash
+# From anywhere — explicit .env
+../../scripts/quality_report.sh \
+  --env .env \
+  --app-name company_info_agent \
+  --time-period all --limit 100
+```
+
+The `--env` flag is also available on `quality_report.py` directly.
 
 ### 4. Inspect results
 
-After a run, check the `reports/` directory:
+Each run creates a timestamped subdirectory under `reports/`:
+
+```
+reports/
+  run_20260430_174920/          # one directory per run
+    run.log                     # full console output (ANSI stripped)
+    synthetic_traffic_cycle_1.json      # generated questions (Step 1)
+    latest_eval_results.json            # session IDs + responses (Step 2)
+    expected_session_ids_cycle_1.json   # copy of eval results for BQ lookup
+    quality_report_cycle_1.json         # LLM judge scores (Step 3)
+    operational_metrics_cycle_1_baseline.json  # latency/tokens/turns (Step 3)
+    ground_truth_latest.json            # teacher agent answers (Step 4)
+    synthetic_traffic_cycle_1_fresh.json       # fresh questions (Step 5)
+    expected_session_ids_cycle_1_fresh.json    # fresh session IDs (Step 5)
+    quality_report_cycle_1_after.json          # post-improvement scores (Step 5)
+    operational_metrics_cycle_1.json           # before/after comparison (Step 5)
+  run_20260430_183045/          # next run — previous runs are preserved
+    ...
+```
+
+Previous runs are never deleted. `reset.sh` only resets the prompt
+and golden eval set, not the reports directory.
 
 ```bash
-# Quality report JSON (consumed by the improver)
-cat reports/quality_report_cycle_1.json | python3 -m json.tool | head -20
+# Browse runs
+ls reports/
 
-# Synthetic traffic that was generated
-cat reports/synthetic_traffic_cycle_1.json | python3 -m json.tool | head -20
+# Quality report JSON (consumed by the improver)
+cat reports/run_*/quality_report_cycle_1.json | python3 -m json.tool | head -20
+
+# Full console log
+less reports/run_20260430_174920/run.log
 
 # See new eval cases extracted from failures
 cat eval/eval_cases.json
@@ -569,14 +647,17 @@ cat eval/eval_cases.json
 
 ### Reset to V1
 
-To start over, reset everything to the initial state (fresh V1
-prompt in Vertex AI, 3 golden eval cases, no reports):
+To start over, reset the prompt and golden eval set to their initial
+state. Previous run reports are preserved.
 
 ```bash
 ./reset.sh
 ```
 
-This deletes the old Vertex AI prompt and creates a fresh one at V1.
+This restores the V1 prompt in Vertex AI, resets `eval_cases.json` to
+the original 3 golden cases, and removes generated synthetic traffic
+files. The `reports/` directory (with timestamped run subdirectories)
+is not deleted.
 
 ## Using with Other Agents
 

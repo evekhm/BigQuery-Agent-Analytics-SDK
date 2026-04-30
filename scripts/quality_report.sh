@@ -10,11 +10,38 @@
 #   ./quality_report.sh --time-period 7d         # evaluate last 7 days
 #   ./quality_report.sh --samples 20             # show 20 sessions per category
 #   ./quality_report.sh --samples all            # show all sessions
+#   ./quality_report.sh --env path/to/.env       # use a specific .env file
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Load .env from repo root if present
-if [ -f "${SCRIPT_DIR}/../.env" ]; then
+# Parse --env flag before other processing
+ENV_FILE=""
+PASSTHROUGH_ARGS=()
+for arg in "$@"; do
+    if [ "$_NEXT_IS_ENV" = "1" ]; then
+        ENV_FILE="$arg"
+        _NEXT_IS_ENV=0
+        continue
+    fi
+    if [ "$arg" = "--env" ]; then
+        _NEXT_IS_ENV=1
+        continue
+    fi
+    PASSTHROUGH_ARGS+=("$arg")
+done
+unset _NEXT_IS_ENV
+set -- "${PASSTHROUGH_ARGS[@]}"
+
+# Load .env: explicit --env wins, then repo root default
+if [ -n "$ENV_FILE" ]; then
+    if [ ! -f "$ENV_FILE" ]; then
+        echo "ERROR: --env file not found: $ENV_FILE"
+        exit 1
+    fi
+    set -a
+    source "$ENV_FILE"
+    set +a
+elif [ -f "${SCRIPT_DIR}/../.env" ]; then
     set -a
     source "${SCRIPT_DIR}/../.env"
     set +a

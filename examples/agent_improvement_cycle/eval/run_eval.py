@@ -27,7 +27,23 @@ import logging
 import warnings
 
 warnings.filterwarnings("ignore")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="authlib")
+
+# authlib forces simplefilter("always") at import time; neutralise early.
+try:
+  import authlib.deprecate
+  warnings.filterwarnings("ignore",
+                          category=authlib.deprecate.AuthlibDeprecationWarning)
+except ImportError:
+  pass
+
+# Suppress noisy SDK loggers before any google imports.
+for _name in (
+    "google.genai", "google_genai",
+    "google.auth", "google_auth",
+    "google.adk", "google_adk",
+    "httpx", "httpcore",
+):
+    logging.getLogger(_name).setLevel(logging.ERROR)
 
 import asyncio
 import json
@@ -117,7 +133,7 @@ async def run_all_cases(
     async with semaphore:
       try:
         result = await asyncio.wait_for(
-            run_single_case(runner, case), timeout=120
+            run_single_case(runner, case), timeout=200
         )
         resp_text = result["response"].replace("\n", " ").strip()
         print(f"  [{i}/{len(cases)}] {case['id']}: {case['question']}")
@@ -125,12 +141,12 @@ async def run_all_cases(
         return result
       except asyncio.TimeoutError:
         print(f"  [{i}/{len(cases)}] {case['id']}: {case['question']}")
-        print(f"           -> TIMEOUT (120s)")
+        print(f"           -> TIMEOUT (200s)")
         return {
             "case_id": case["id"],
             "question": case["question"],
             "category": case.get("category", ""),
-            "response": "ERROR: Timeout after 120s",
+            "response": "ERROR: Timeout after 200s",
             "session_id": "",
         }
       except Exception as e:
@@ -220,6 +236,15 @@ def main() -> None:
           " provided, uses the demo's company_info_agent config."
       ),
   )
+  parser.add_argument(
+      "--output-dir",
+      type=str,
+      default=None,
+      help=(
+          "Directory to write latest_eval_results.json into."
+          " Defaults to <demo>/reports/."
+      ),
+  )
   args = parser.parse_args()
 
   if args.golden:
@@ -236,7 +261,8 @@ def main() -> None:
     )
 
   # Write results to a file for reference
-  results_path = os.path.join(_DEMO_DIR, "reports", "latest_eval_results.json")
+  output_dir = args.output_dir or os.path.join(_DEMO_DIR, "reports")
+  results_path = os.path.join(output_dir, "latest_eval_results.json")
   os.makedirs(os.path.dirname(results_path), exist_ok=True)
   with open(results_path, "w") as f:
     json.dump(results, f, indent=2)

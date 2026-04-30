@@ -290,8 +290,8 @@ async def _generate_via_vertex_optimizer(
   gt_results = await _generate_ground_truth(config, failed)
   logger.info("Generated %d ground truth answers.", len(gt_results))
 
-  # Save ground truth to reports/ for inspection
-  gt_dir = os.path.join(
+  # Save ground truth for inspection
+  gt_dir = _state.get("output_dir") or os.path.join(
       os.path.dirname(config.eval_cases_path), "..", "reports"
   )
   os.makedirs(gt_dir, exist_ok=True)
@@ -840,6 +840,7 @@ async def run_improvement(
     report: dict | None = None,
     report_path: str | None = None,
     from_eval_results: bool = False,
+    output_dir: str | None = None,
 ) -> dict:
   """Run the improvement cycle.
 
@@ -851,6 +852,8 @@ async def run_improvement(
           if ``from_eval_results`` is True).
       from_eval_results: If True, treat ``report_path`` as golden eval
           results and build a synthetic quality report.
+      output_dir: Directory for ground_truth_latest.json. Defaults to
+          ``<demo>/reports/``.
 
   Returns:
       Dict with ``old_version``, ``new_version``, ``golden_cases``,
@@ -901,8 +904,13 @@ async def run_improvement(
         "improvement_result": "no_data",
     }
 
-  if report["summary"]["meaningful_rate"] >= 95:
-    logger.info("Quality is already high (>=95%%). No improvement needed.")
+  threshold_pct = config.quality_threshold * 100
+  if report["summary"]["meaningful_rate"] >= threshold_pct:
+    logger.info(
+        "Quality %.0f%% meets threshold (%.0f%%). No improvement needed.",
+        report["summary"]["meaningful_rate"],
+        threshold_pct,
+    )
     return {
         "old_version": old_version,
         "new_version": old_version,
@@ -943,6 +951,7 @@ async def run_improvement(
   # Set shared state for tool functions
   _state["config"] = config
   _state["report"] = report
+  _state["output_dir"] = output_dir
 
   # Run the LoopAgent
   improver = create_improver_agent(config)

@@ -11,5 +11,6 @@
   "prompt_storage": "vertex",
   "vertex_prompt_id": "",
   "use_vertex_optimizer": true,
-  "max_failure_extract": "auto"
+  "max_failure_extract": "auto",
+  "quality_threshold": 0.95
 }

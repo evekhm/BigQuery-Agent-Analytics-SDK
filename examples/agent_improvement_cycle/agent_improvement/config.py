@@ -65,7 +65,7 @@ class ImprovementConfig:
   eval_cases_path: str
   model_id: str = "gemini-2.5-flash"
   optimizer_max_iterations: int = 3
-  quality_threshold: float = 1.0
+  quality_threshold: float = 0.95
   judge_prompt: str | None = None
   teacher_model_id: str | None = None
   use_vertex_optimizer: bool = False

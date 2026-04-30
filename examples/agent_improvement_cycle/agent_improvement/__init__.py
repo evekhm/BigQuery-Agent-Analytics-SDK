@@ -20,6 +20,18 @@ cases pass.
 """
 
 import logging
+import warnings
+
+warnings.filterwarnings("ignore")
+
+# authlib forces simplefilter("always") at import time; neutralise it
+# by importing the module early and overriding the filter.
+try:
+  import authlib.deprecate
+  warnings.filterwarnings("ignore",
+                          category=authlib.deprecate.AuthlibDeprecationWarning)
+except ImportError:
+  pass
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,7 +39,16 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 # Suppress noisy third-party loggers.
-logging.getLogger("google.genai").setLevel(logging.ERROR)
+# google.genai / google_genai  — "AFC is enabled", "will take precedence"
+# google_adk                   — "Sending out request", "Response received"
+# httpx / httpcore             — "HTTP Request: POST ..."
+for _noisy in (
+    "google.genai", "google_genai",
+    "google.adk", "google_adk",
+    "google.auth", "google_auth",
+    "httpx", "httpcore",
+):
+    logging.getLogger(_noisy).setLevel(logging.ERROR)
 
 from agent_improvement.config import ImprovementConfig
 from agent_improvement.config_loader import load_agent_module
