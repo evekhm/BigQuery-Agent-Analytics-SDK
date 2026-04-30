@@ -31,19 +31,25 @@ warnings.filterwarnings("ignore")
 # authlib forces simplefilter("always") at import time; neutralise early.
 try:
   import authlib.deprecate
-  warnings.filterwarnings("ignore",
-                          category=authlib.deprecate.AuthlibDeprecationWarning)
+
+  warnings.filterwarnings(
+      "ignore", category=authlib.deprecate.AuthlibDeprecationWarning
+  )
 except ImportError:
   pass
 
 # Suppress noisy SDK loggers before any google imports.
 for _name in (
-    "google.genai", "google_genai",
-    "google.auth", "google_auth",
-    "google.adk", "google_adk",
-    "httpx", "httpcore",
+    "google.genai",
+    "google_genai",
+    "google.auth",
+    "google_auth",
+    "google.adk",
+    "google_adk",
+    "httpx",
+    "httpcore",
 ):
-    logging.getLogger(_name).setLevel(logging.ERROR)
+  logging.getLogger(_name).setLevel(logging.ERROR)
 
 import asyncio
 import json
