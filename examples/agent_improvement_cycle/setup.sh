@@ -81,11 +81,16 @@ echo "  Vertex AI API: enabled"
 # 4. Install dependencies
 echo ""
 echo "[4/6] Installing Python dependencies..."
+if ! command -v uv &>/dev/null; then
+  echo "  Installing uv..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
 # Remove standalone vertexai if present — it conflicts with the one
 # bundled in google-cloud-aiplatform and shadows the newer version.
-pip show vertexai 2>/dev/null | grep -q "^Version:" && \
-  pip uninstall vertexai -y --quiet 2>/dev/null || true
-pip install -r "$SCRIPT_DIR/requirements.txt" --quiet
+uv pip show vertexai 2>/dev/null | grep -q "^Version:" && \
+  uv pip uninstall vertexai 2>/dev/null || true
+uv pip install -r "$SCRIPT_DIR/requirements.txt"
 echo "  Dependencies installed."
 
 # 5. Configure environment

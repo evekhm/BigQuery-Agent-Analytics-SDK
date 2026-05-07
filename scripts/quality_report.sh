@@ -10,11 +10,38 @@
 #   ./quality_report.sh --time-period 7d         # evaluate last 7 days
 #   ./quality_report.sh --samples 20             # show 20 sessions per category
 #   ./quality_report.sh --samples all            # show all sessions
+#   ./quality_report.sh --env path/to/.env       # use a specific .env file
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Load .env from repo root if present
-if [ -f "${SCRIPT_DIR}/../.env" ]; then
+# Parse --env flag before other processing
+ENV_FILE=""
+PASSTHROUGH_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --env)
+            ENV_FILE="$2"
+            shift 2
+            ;;
+        *)
+            PASSTHROUGH_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+set -- "${PASSTHROUGH_ARGS[@]}"
+
+# Load .env: explicit --env wins, then repo root default
+if [ -n "$ENV_FILE" ]; then
+    if [ ! -f "$ENV_FILE" ]; then
+        echo "ERROR: --env file not found: $ENV_FILE"
+        exit 1
+    fi
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+elif [ -f "${SCRIPT_DIR}/../.env" ]; then
     set -a
     source "${SCRIPT_DIR}/../.env"
     set +a
@@ -24,7 +51,8 @@ fi
 for var in PROJECT_ID DATASET_ID TABLE_ID DATASET_LOCATION; do
     if [ -z "${!var}" ]; then
         echo "ERROR: Required environment variable ${var} is not set."
-        echo "Set it in your shell or create a .env file. See scripts/README.md."
+        echo "Set it in your shell or create a .env file with these variables,"
+        echo "or pass --env path/to/.env. See scripts/README.md."
         exit 1
     fi
 done
