@@ -85,8 +85,7 @@ echo "[4/6] Installing Python dependencies..."
 # bundled in google-cloud-aiplatform and shadows the newer version.
 pip show vertexai 2>/dev/null | grep -q "^Version:" && \
   pip uninstall vertexai -y --quiet 2>/dev/null || true
-pip install "google-cloud-aiplatform>=1.148.0" "pandas>=2.0.0" "python-dotenv>=1.0.0" \
-  "google-adk>=1.0.0" "google-genai>=1.0.0" --quiet
+pip install -r "$SCRIPT_DIR/requirements.txt" --quiet
 echo "  Dependencies installed."
 
 # 5. Configure environment
