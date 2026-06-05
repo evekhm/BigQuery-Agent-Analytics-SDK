@@ -9,12 +9,15 @@ of this series, the agent fixed its own prompt: it took the questions it got
 wrong, had a **teacher model** generate the correct answers, and optimized the
 system prompt against a golden eval. It worked -- ~60% to ~99% in one run -- but
 it needed a teacher, learned only from failures, and handed back a flat prompt
-string you couldn't diff.
+string. It was versioned in the Prompt Registry, so you could diff it -- but it's
+one opaque block, so the diff shows text churn, not *which* behavioral rule
+changed or *why*.
 
 This post removes the teacher. The agent reads *all* its own conversation traces
 -- the ones that worked and the ones that didn't -- and writes itself a
-structured, versioned `SKILL.md` you can read and diff, with every version
-tracked in the Skill Registry. A fleet of analysts reads those traces -- one per
+structured, versioned `SKILL.md` -- named sections you review rule-by-rule, so a
+diff shows exactly which rule each version added, with every version tracked in
+the Skill Registry. A fleet of analysts reads those traces -- one per
 failure asking what rule would have prevented it, sampled successes asking what
 to reinforce -- and an inductive consolidator merges the rules that recur into
 the new version. By the end you'll have a one-command loop that takes a
