@@ -5,6 +5,7 @@ Standalone scripts for the BigQuery Agent Analytics SDK.
 | Script | Description |
 |--------|-------------|
 | [quality_report](#quality-report) | LLM-as-a-judge evaluation over agent sessions |
+| [skill_evolution](#skill-evolution) | Evolve a versioned `SKILL.md` from a scored quality report |
 | [latency_report](#latency-report-1) | Timing tree and waterfall for agent traces with A2A stitching |
 
 ## Quality Report
@@ -226,3 +227,73 @@ Use `--no-stitch` to disable this behavior.
 ### Sample report output
 
 [Sample latency report](sample_latency_report.md)
+
+## Skill Evolution
+
+Evolves an agent's skill from its own conversation traces. It reads a scored
+quality report (the output of [Quality Report](#quality-report)), partitions the
+trajectories into successes and failures, runs a fleet of parallel, independent
+analysts (one per failure; sampled successes), and consolidates the recurring
+rules into a new, version-bumped `SKILL.md`. No teacher model supplies the
+answers — the agent learns what to fix and what to keep from how it was used.
+
+The method follows two 2026 papers — [Trace2Skill](https://arxiv.org/abs/2603.25158)
+(parallel analysts + inductive consolidation, held-out validation) and
+[AutoSkill](https://arxiv.org/abs/2603.01145) (versioned skill evolution as a
+semantic merge). It is engine-only: it consumes a report *dict* and returns
+skill text — it does not import `quality_report`, so the two compose but are
+independent.
+
+### Prerequisites
+
+Vertex AI via the google-genai client. Set `GOOGLE_CLOUD_PROJECT` and
+`GOOGLE_CLOUD_LOCATION` (Gemini 3.x models use the `global` endpoint), and
+authenticate with ADC (`gcloud auth application-default login`).
+
+### Python API
+
+`skill_evolution.py` is importable the same way as `quality_report` (e.g. via
+`import_sdk_module("skill_evolution")`):
+
+```python
+import skill_evolution
+
+evolved = skill_evolution.evolve_skill(
+    report,            # a quality report dict (or path) with golden_qa scoring
+    current_skill,     # the current SKILL.md text (the base to merge into)
+    model="gemini-2.5-pro",
+    candidates=3,      # best-of-N consolidation
+    max_chars=3500,    # keep the skill small (overfitting shows up as bloat)
+    score_fn=None,     # optional (skill_text)->float to pick/gate the best candidate
+)
+```
+
+With no `score_fn` the engine returns the median-size viable candidate; the
+held-out re-score is the proof. Guardrails reject candidates that drop a base
+section, leak placeholders, or truncate.
+
+### CLI
+
+```bash
+python scripts/skill_evolution.py \
+    --report quality_report.json \
+    --skill path/to/SKILL.md \
+    --model gemini-2.5-pro --candidates 3 --max-chars 3500 \
+    -o evolved_SKILL.md
+```
+
+### Corrections are not answers (anti-parroting)
+
+When a user corrects the agent, an answer counts as a *recovery* only if the
+agent re-verified with a tool. If it merely echoed the user's claim, the turn
+tagger (`quality_report.py --tag-turns`) labels it `parroted`; this engine
+reclassifies a parroted "recovery" as a failure (`_has_parroted_recovery`), the
+error analyst records the root cause `PARROTING`, and the success analyst
+refuses to extract a pattern from it (`NO_PATCH`). The learned rule: when
+corrected, verify with a tool — don't just agree.
+
+### Runnable example
+
+See [`examples/skill_evolution_lab/`](../examples/skill_evolution_lab/) for an
+end-to-end demo: a flawed V0 skill → traffic → golden-Q&A scoring → `evolve_skill`
+→ tool-first V1, with Skill Registry versioning.
