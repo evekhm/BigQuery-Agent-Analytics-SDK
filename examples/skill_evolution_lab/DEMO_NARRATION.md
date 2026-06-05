@@ -4,7 +4,7 @@ BigQuery Agent Analytics Series: Building a self-improving ADK agent that rewrit
 
 ## Teach your agent to read its own conversations and write itself a better, versioned skill -- no teacher model
 
-In the [first post](https://medium.com/google-cloud/your-agent-can-fix-its-own-prompt-heres-how)
+In the [first post](https://medium.com/google-cloud/your-agent-can-fix-its-own-prompt-heres-how-f7bfa970ccb5)
 of this series, the agent fixed its own prompt: it took the questions it got
 wrong, had a **teacher model** generate the correct answers, and optimized the
 system prompt against a golden eval. It worked -- ~60% to ~99% in one run -- but
@@ -14,9 +14,12 @@ string you couldn't diff.
 This post removes the teacher. The agent reads *all* its own conversation traces
 -- the ones that worked and the ones that didn't -- and writes itself a
 structured, versioned `SKILL.md` you can read and diff, with every version
-tracked in the Skill Registry. By the end you'll have a one-command loop that
-takes a deliberately flawed skill to a fully grounded one across three Gemini-3
-models. Everything is reproducible from
+tracked in the Skill Registry. A fleet of analysts reads those traces -- one per
+failure asking what rule would have prevented it, sampled successes asking what
+to reinforce -- and an inductive consolidator merges the rules that recur into
+the new version. By the end you'll have a one-command loop that takes a
+deliberately flawed skill to a fully grounded one across three Gemini-3 models.
+Everything is reproducible from
 [`examples/skill_evolution_lab/`](.): the agent, the questions, the engine
 (imported from the SDK, not copied), the scored outputs in
 [`sample_run/`](sample_run/), and one command that runs the whole loop.
@@ -37,28 +40,6 @@ models. Everything is reproducible from
 - **The Skill Registry** -- the Gemini Enterprise Agent Platform's versioned
   store for `SKILL.md`: V0 is revision 1, the evolved V1 is revision 2, each an
   immutable revision you can diff, roll back, and audit.
-
-## From fixing failures to extracting a skill
-
-In the [first post](https://medium.com/google-cloud/your-agent-can-fix-its-own-prompt-heres-how),
-the agent learned from its mistakes by knowledge distillation: take the questions
-it got wrong, have a **teacher model** generate the correct answers, feed the
-(question, wrong, correct) gap to Vertex AI's Prompt Optimizer, and it rewrites
-the system prompt, gated by a golden eval. It works — a company-policy agent went
-from 64% to 99% useful answers in one run — but it has limits:
-
-- **It needs a teacher.** Something already has to know the right answers.
-- **It only learns from failures.** Every successful conversation is thrown away.
-- **The output is a flat prompt string.** You can't see which rule changed, or why.
-
-What if the agent could analyze *all* its conversations — successes and failures
-— and write its own instruction manual, with no teacher to supply the answers?
-That is **skill evolution**. A fleet of analysts reads the traces: each failure
-gets an analyst that asks "what went wrong, and what rule prevents it?", and
-sampled successes get one that asks "what worked, and should we reinforce it?".
-An inductive consolidator merges the rules that recur into a single versioned
-`SKILL.md` — structured into named sections, so you can read each rule the agent
-learned and diff exactly what changed between versions.
 
 ## What is a skill?
 
