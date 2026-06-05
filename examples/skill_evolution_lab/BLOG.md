@@ -70,8 +70,7 @@ V1 is the second.
 
 The method comes from two 2026 papers, and we adopt them deliberately.
 
-**Trace2Skill** ([arXiv:2603.25158](https://arxiv.org/abs/2603.25158), ETH Zurich
-+ Qwen/Alibaba). A batch, three-stage pipeline that mirrors a human expert
+**Trace2Skill** ([arXiv:2603.25158](https://arxiv.org/abs/2603.25158), ETH Zurich + Qwen/Alibaba). A batch, three-stage pipeline that mirrors a human expert
 writing an operational manual: generate trajectories (labelled success/failure),
 propose patches with a **parallel multi-agent analyst fleet** (one analyst per
 trajectory, each on a *frozen* copy of the skill so they can't contaminate each
