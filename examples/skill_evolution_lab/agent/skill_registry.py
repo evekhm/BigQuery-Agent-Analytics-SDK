@@ -115,7 +115,9 @@ class SkillRegistry:
 
   # -- operations ---------------------------------------------------------
 
-  def create(self, skill_id: str, skill_dir: str, *, display_name=None, description="") -> dict:
+  def create(
+      self, skill_id: str, skill_dir: str, *, display_name=None, description=""
+  ) -> dict:
     """CreateSkill (LRO). Returns the created skill (revision 1 = V0)."""
     body = {
         "displayName": display_name or skill_id,
@@ -132,7 +134,9 @@ class SkillRegistry:
     logger.info("CreateSkill %s submitted; waiting...", skill_id)
     return self._wait(resp.json())
 
-  def update(self, skill_id: str, skill_dir: str, *, display_name=None, description="") -> dict:
+  def update(
+      self, skill_id: str, skill_dir: str, *, display_name=None, description=""
+  ) -> dict:
     """UpdateSkill (LRO) -> a new immutable revision (e.g. V1)."""
     body = {
         "displayName": display_name or skill_id,
