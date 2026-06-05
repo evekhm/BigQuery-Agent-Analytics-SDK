@@ -51,7 +51,14 @@ skill_evolution_lab/
   registry_cli.py       # create/update/delete/inspect registry revisions
   run_e2e_demo.sh       # the whole cycle, one command
   setup.sh / reset.sh   # write .env / revert to V0 (local + registry)
+  sample_run/           # a committed end-to-end run (scored reports, evolved
+                        #   skill, RESULT) + README explaining each artifact
 ```
+
+A complete recorded run lives in [`sample_run/`](sample_run/) — the scored V0/V1
+reports, the evolved skill, and `RESULT.md` — so you can read the exact inputs and
+outputs (and what each file means) without running anything. Live runs write to
+`runs/<timestamp>/` (git-ignored).
 
 ## Prerequisites
 
