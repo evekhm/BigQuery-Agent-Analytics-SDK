@@ -31,16 +31,24 @@
 # Skill Registry as a new revision.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
+
+# CLI/env overrides take precedence over .env (which only supplies defaults),
+# so `AGENT_MODEL=gemini-3.1-pro-preview ./run_e2e_demo.sh` actually wins.
+_cli_AGENT_MODEL="${AGENT_MODEL:-}"
+_cli_ANALYST_MODEL="${ANALYST_MODEL:-}"
+_cli_JUDGE_MODEL="${JUDGE_MODEL:-}"
+_cli_JUDGE_LOCATION="${JUDGE_LOCATION:-}"
+_cli_CONCURRENCY="${CONCURRENCY:-}"
 [ -f .env ] && source .env
 
 export GOOGLE_GENAI_USE_VERTEXAI=True
 export GOOGLE_CLOUD_PROJECT="${PROJECT_ID:-${GOOGLE_CLOUD_PROJECT:-}}"
 
-AGENT_MODEL="${AGENT_MODEL:-gemini-3-flash-preview}"
-ANALYST_MODEL="${ANALYST_MODEL:-gemini-3.1-pro-preview}"
-JUDGE_MODEL="${JUDGE_MODEL:-gemini-2.5-flash}"
-JUDGE_LOCATION="${JUDGE_LOCATION:-us-central1}"
-CONC="${CONCURRENCY:-3}"
+AGENT_MODEL="${_cli_AGENT_MODEL:-${AGENT_MODEL:-gemini-3-flash-preview}}"
+ANALYST_MODEL="${_cli_ANALYST_MODEL:-${ANALYST_MODEL:-gemini-3.1-pro-preview}}"
+JUDGE_MODEL="${_cli_JUDGE_MODEL:-${JUDGE_MODEL:-gemini-2.5-flash}}"
+JUDGE_LOCATION="${_cli_JUDGE_LOCATION:-${JUDGE_LOCATION:-us-central1}}"
+CONC="${_cli_CONCURRENCY:-${CONCURRENCY:-3}}"
 
 SKILL=skills/SKILL.md
 V0=skills/SKILL.v0.md
