@@ -152,7 +152,12 @@ Merge rules (follow ALL):
 6. Import only reusable, non-conflicting additions; strip case-specific entities
    and analyst scratch notes ("NO_PATCH", "Root Cause:").
 7. Do not invent figures or policies absent from the base or a patch.
-8. On conflict, keep the better-evidenced patch.
+8. A skill is BEHAVIORAL: do NOT bake specific data values (numbers, dates,
+   dollar amounts, limits) into it -- those must come from tools at runtime, and
+   copies go stale or wrong. Keep rules and tool-usage guidance; never paste
+   tool-result facts pulled from a trajectory. (Preserve any data already in the
+   base verbatim, but add no new specific values.)
+9. On conflict, keep the better-evidenced patch.
 
 Output the COMPLETE merged SKILL.md (frontmatter + full body):
 - YAML frontmatter between --- delimiters: keep name/description; set
