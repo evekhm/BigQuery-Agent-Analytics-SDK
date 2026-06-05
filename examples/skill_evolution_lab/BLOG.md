@@ -1,6 +1,6 @@
 # Your Agent Can Write Its Own Skill. Here's How.
 
-BigQuery Agent Analytics Series: Building a self-improving ADK agent that rewrites its own skill from its conversation traces, with the [BigQuery Agent Analytics Plugin](https://adk.dev/integrations/bigquery-agent-analytics/), the [BigQuery-Agent-Analytics-SDK](https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK), [ADK Skills](https://adk.dev), and the [Gemini Enterprise Agent Platform Skill Registry](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/skill-registry).
+> BigQuery Agent Analytics Series: Building a self-improving ADK agent that rewrites its own skill from its conversation traces, with the [BigQuery Agent Analytics Plugin](https://adk.dev/integrations/bigquery-agent-analytics/), the [BigQuery-Agent-Analytics-SDK](https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK), [ADK Skills](https://adk.dev), and the [Gemini Enterprise Agent Platform Skill Registry](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/skill-registry).
 
 ## Teach your agent to read its own conversations and write itself a better, versioned skill -- no teacher model
 
@@ -363,39 +363,63 @@ lab, the turn tagger segments each correction into pre-correction `[-]` and
 post-correction `[+]` sub-trajectories, and marks a cave-in `[~]` parroted. Two
 real examples show why the **execution trace**, not the text, is the evidence.
 
-Parroted recovery — the agent agrees without verifying (no tool call after the
-correction):
+The evidence is the **execution trace**, and the SDK renders it for you. Running
+`quality_report.py --session <id> --tag-turns` fetches the trace and splits it at
+the correction boundary into `pre_correction` / `post_correction` sub-trajectories,
+each labelled `wrong` / `recovered` / `parroted`. Here is the actual SDK output
+for a genuine recovery (from
+[`sample_quality_report_session.md`](https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK/blob/main/scripts/sample_quality_report_session.md) —
+the question "Is Juneteenth a company holiday?", where the agent first answers
+wrong, the user corrects it, and it re-verifies):
 
 ```text
-User:  I heard we have a sabbatical program after 5 years. Is that real?
-Agent: I do not have information about a sabbatical program...
-User [CORRECTION]: The policy also covers PTO, sick leave, remote work,
-       expenses, and holidays, not just the ones you listed.
-Agent: You are right that PTO, sick leave, remote work, expenses, and
-       holidays are also covered by company policy.
+──────────────────────────────────────────────────────────────────────
+  SUB-TRAJECTORY SEGMENTATION
+──────────────────────────────────────────────────────────────────────
 
-trace  before correction: ... policy_agent > TOOL (lookup_company_policy) -> answer
-trace  after correction:  policy_agent > LLM_RESPONSE   (NO tool call -- echoed the user)
+  ❌ pre_correction_1 (turns 0-1) → wrong
+  ├── knowledge_supervisor > USER_MESSAGE_RECEIVED
+  ├── knowledge_supervisor > INVOCATION_STARTING
+  └── knowledge_supervisor > INVOCATION_COMPLETED [14.7s]
+      ├── knowledge_supervisor > AGENT_STARTING
+      └── knowledge_supervisor > AGENT_COMPLETED [2.1s]
+          ├── knowledge_supervisor > LLM_REQUEST
+          └── knowledge_supervisor > LLM_RESPONSE [2.0s, ttft=2.0s]
+
+  ✅ post_correction_1 (turns 2-3) → recovered
+  ├── knowledge_supervisor > USER_MESSAGE_RECEIVED
+  ├── knowledge_supervisor > INVOCATION_STARTING
+  └── knowledge_supervisor > INVOCATION_COMPLETED [1.0min]
+      ├── knowledge_supervisor > AGENT_STARTING
+      └── knowledge_supervisor > AGENT_COMPLETED [1.0min]
+          ├── knowledge_supervisor > LLM_REQUEST
+          ├── knowledge_supervisor > LLM_RESPONSE [5.5s, ttft=5.5s]
+          ├── knowledge_supervisor > TOOL_STARTING (transfer_to_agent)
+          ├── knowledge_supervisor > TOOL_COMPLETED (transfer_to_agent) [0ms]
+          ├── policy_agent > AGENT_STARTING
+          └── policy_agent > AGENT_COMPLETED [56.0s]
+              ├── policy_agent > LLM_REQUEST
+              ├── policy_agent > LLM_RESPONSE [20.2s, ttft=20.2s]
+              ├── policy_agent > TOOL_STARTING (lookup_company_policy)
+              ├── policy_agent > TOOL_COMPLETED (lookup_company_policy) [0ms]
+              ├── policy_agent > LLM_REQUEST
+              └── policy_agent > LLM_RESPONSE [35.7s, ttft=35.7s]
+======================================================================
 ```
 
-The final message is factually correct, but the agent verified nothing — the user
-did the work. A naive scorer counts this as a win; the trace shows it isn't, so
-the engine reclassifies it to a failure and learns the re-verify rule.
+Read the two halves. **Before** the correction the supervisor answered straight
+from the LLM — `LLM_RESPONSE` with no `TOOL_*` span — and got it wrong. **After**
+the correction it routed (`transfer_to_agent`) and the `policy_agent` called
+`TOOL_STARTING (lookup_company_policy)` before answering. That tool call after the
+correction is the deterministic proof of a **genuine recovery**.
 
-Genuine recovery — the agent re-queries the tool after the correction:
-
-```text
-User [SCOPE]: You shouldn't answer questions about promotions, that's out of scope.
-Agent: You are correct... I answer company-policy questions like PTO and sick leave.
-User [FOLLOWUP]: How many PTO days do I get per year?
-Agent: You get 20 PTO days per year.
-
-trace  after correction: policy_agent > TOOL (lookup_company_policy) -> answer
-```
-
-Tool call after the correction = independent verification = a real recovery. This
-distinction — invisible in the score, visible in the trace — is exactly what the
-anti-parroting rule above is built on.
+A **parroted** recovery looks identical in the final text but the post-correction
+sub-trajectory has *no* `TOOL_*` span — just an `LLM_RESPONSE` that echoes the
+user's fact. The final message is factually correct, but the agent verified
+nothing; the user did the work. A naive text scorer counts it as a win, the trace
+shows it isn't, so the engine reclassifies it to a failure and learns the
+re-verify rule. This distinction — invisible in the score, visible only in the
+trajectory — is exactly what the anti-parroting rule above is built on.
 
 ## Results: V0 → V1 across three Gemini-3 models
 

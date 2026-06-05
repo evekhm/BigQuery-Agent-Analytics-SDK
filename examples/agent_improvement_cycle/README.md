@@ -28,6 +28,8 @@ optimized in Vertex AI.
 
 For a guided walkthrough, see the [Demo Narration](DEMO_NARRATION.md).
 
+For a blog post, see the [Medium blog](https://medium.com/google-cloud/your-agent-can-fix-its-own-prompt-heres-how-f7bfa970ccb5)
+
 ![Demo](demo.png)
 ## The Demo Agent
 
