@@ -358,16 +358,12 @@ instead of caving. Same model, same tool, same questions; only the skill changed
 
 ### Parroted vs. genuine recovery (the trace tells you which)
 
-A final answer that *looks* right can hide a failure. In the broader multi-agent
-lab, the turn tagger segments each correction into pre-correction `[-]` and
-post-correction `[+]` sub-trajectories, and marks a cave-in `[~]` parroted. Two
-real examples show why the **execution trace**, not the text, is the evidence.
-
-The evidence is the **execution trace**, and the SDK renders it for you. Running
-`quality_report.py --session <id> --tag-turns` fetches the trace and splits it at
-the correction boundary into `pre_correction` / `post_correction` sub-trajectories,
-each labelled `wrong` / `recovered` / `parroted`. Here is the actual SDK output
-for a genuine recovery (from
+A final answer that *looks* right can hide a failure, and the evidence is the
+**execution trace**, not the text — which is why the SDK renders it for you.
+Running `quality_report.py --session <id> --tag-turns` fetches the trace and
+splits it at the correction boundary into `pre_correction` / `post_correction`
+sub-trajectories, each labelled `wrong` / `recovered` / `parroted`. Here is the
+actual SDK output for a genuine recovery (from
 [`sample_quality_report_session.md`](https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK/blob/main/scripts/sample_quality_report_session.md) —
 the question "Is Juneteenth a company holiday?", where the agent first answers
 wrong, the user corrects it, and it re-verifies):
