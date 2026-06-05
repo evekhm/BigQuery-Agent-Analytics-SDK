@@ -144,7 +144,9 @@ Stage by stage:
   (`KEYWORD_GAP`, `MISSING_RULE`, `AMBIGUITY`, `SCOPE_GAP`, `HALLUCINATION`,
   `CORRECTION_IGNORE`, `PARROTING`) and the rule that would have prevented it.
 - **Success analysts** — sampled (default max 15) — extract a transferable
-  pattern from what worked, or return `NO_PATCH`.
+  pattern from what worked (for example, that casual phrasing like "vacation days"
+  maps to the PTO topic), or return `NO_PATCH`. Learning from successes, not just
+  failures, is what produces a complete skill instead of a list of don'ts.
 - **Quality gate.** Each patch must be substantive and carry a root-cause
   category; weak patches are dropped. A high rejection rate means the analyst
   prompts need tuning.
@@ -443,20 +445,20 @@ gemini-3.1-pro-preview    19.0% -> 100%    5% -> 86%
 
 Every model recovers to 100% on the held-out set, none introduced a hallucinated
 answer, and the grounding column shows *why*: V0 barely calls the tool (0–29%),
-because the flawed skill tells it not to; V1 calls it on ~90%. The baseline is
+because the flawed skill tells it not to; V1 calls it on 86–90%. The baseline is
 harsh because the held-out set is mostly benefits/expenses topics not in V0's
 baked summary, so V0 declines on nearly all of them; once the skill is tool-first,
 the same tool answers them.
 
-The **`gemini-3.1-pro-preview`** row is the sharpest illustration of the
-counterintuitive finding in Trap 3 below. Pro grounded on only **5%** of its V0
-answers — far below flash's 29% — because the more capable model obeyed "answer
-only from the above, else contact HR" most faithfully and deferred on almost
-everything, including topics it had a tool for. The flawed prompt made the
-*strongest* model defer the *most*; the evolved skill then recovered it the most,
-lifting Pro to 86% grounding and 100% correctness. The "only weak models need the
-skill" intuition is backwards — and it is the most capable, most verbose model
-where a judge *without* ground truth misleads you the most (Trap 4).
+Notice how little V0 grounds across the board — flash **29%**, Pro **5%**,
+flash-lite **0%**: the flawed skill suppresses the tool on every model, the most
+capable included. Pro grounded on just **5%** of its V0 answers and still
+recovered to **86% grounding, 100% correctness** — so the "only weak models need
+the skill" intuition is backwards: a more capable model follows the bad
+instruction just as faithfully, and it is the most capable, most verbose model
+where a judge *without* ground truth misleads you the most (Trap 4). (In a
+companion run on a different question mix, the strongest model had the single
+worst V0 baseline and the largest recovery — see Trap 3.)
 
 We show a single iteration (V0 → V1) here for clarity. The framework is built to
 keep going — evolve, deploy, generate fresh traffic, score, evolve again
@@ -481,10 +483,12 @@ Almost everything below is a thing we got wrong first.
   physically couldn't fan out and merge. Switching to the **AgentTool** pattern
   unlocked it. Before you blame the prompt, check whether the architecture even
   *permits* the behavior.
-- **Trap 3 — The most capable model fails the *most*.** A stronger model follows
-  the bad instruction more faithfully, so it defers more (worse V0) and the
-  learned skill recovers it the most. The "only weak models need the skill"
-  intuition is backwards.
+- **Trap 3 — The most capable model can fail the *most*.** A stronger model
+  follows the bad instruction more faithfully, so it can defer more (worse V0) and
+  the learned skill then recovers it the most. In a companion run the strongest
+  model (Pro) had the single worst V0 baseline (44%) and the largest recovery (to
+  94%); in this example's run all three baselines are low (14–24%) and recover to
+  100%. Either way, the "only weak models need the skill" intuition is backwards.
 - **Trap 4 — A judge without ground truth lies.** A "usefulness" judge with no
   answer key mislabels correct, tool-grounded answers — worst on the most verbose
   (most capable) model. The fix is [`eval/eval_spec.json`](https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK/blob/main/examples/skill_evolution_lab/eval/eval_spec.json):
@@ -493,9 +497,10 @@ Almost everything below is a thing we got wrong first.
   when the agent is bad*: scoring with vs. without ground truth flipped ~28% of V0
   verdicts but only ~8% of V1 — exactly when evolution needs the clearest signal.
 - **Trap 5 — Overfitting shows up as bloat.** Against a task with no real general
-  fix, the algorithm overfits quietly into large skills full of keyword-mapping
-  tables. A skill that enumerates cases instead of stating a rule is the tell —
-  `--max-chars` keeps it small enough to read and believe.
+  fix, the algorithm overfits quietly into large skills (we saw ~12KB) full of
+  keyword-mapping tables ("travel, meals → expenses"). A skill that enumerates
+  cases instead of stating a rule is the tell — `--max-chars` keeps it small
+  enough to read and believe (the evolved skill here is ~2.5KB).
 - **Trap 6 — Consolidation is the stochastic bottleneck.** Same patches, same
   temperature, can consolidate into very different skills (we measured up to a
   ~34pp swing single-shot). The analyst fleet reliably produces good patches; how
@@ -549,6 +554,20 @@ backlog. A triage pass classifies every remaining failure by *who* can fix it:
 - **KNOWLEDGE** — the right tool ran, but the fact isn't in the data → add the doc.
 - **PRODUCT** — out of scope → a clean decline is a policy decision.
 
+In the broader multi-agent lab this produced a pull request for the skill fix plus
+GitHub issues for everything else — each labeled and routed to an owner:
+
+```text
+PR     evolved skill (reviewable diff, before/after metrics)
+issue  [ENG]        incident-response question -- no tool exists
+issue  [KNOWLEDGE]  marriage as a qualifying life event -- fact missing
+issue  [PRODUCT]    "list everything that resets at year end" -- decline
+```
+
+That is the difference between a quality *score* and a quality *loop*: the agent
+fixes what it can, proves it with a diff, and tells you — with an owner and a
+recommended action — what it cannot.
+
 > **Scope note.** This triage/routing system — and the multi-agent co-evolution
 > it pairs with — is **not part of this example or the SDK** yet. It is the
 > subject of the follow-up below. This post is scoped to the self-contained,
@@ -562,6 +581,9 @@ detail, how to wire it into a deployed, end-to-end system on Google Cloud:
 - **Scored on real BigQuery traffic.** Your agent already logs every session via
   the BigQuery Agent Analytics plugin; the quality agent scores recent sessions
   against the golden Q&A, filtered to the deployed skill version, on a schedule.
+  It sorts what it finds: an answer that used to work but now fails is a
+  **regression**, a known topic handled poorly is a **gap**, and a question nobody
+  anticipated is a **new topic** for a human to rule in or out of scope.
 - **Run as managed jobs.** The evolution engine as a Cloud Run Job on a weekly
   Cloud Scheduler trigger (or fired when gaps accumulate), versioning each skill
   in the Skill Registry.
