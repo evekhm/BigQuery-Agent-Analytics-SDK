@@ -196,13 +196,16 @@ changes** — so any quality delta is attributable to the skill.
 
 ## The cycle: learning from users
 
-The signal that drives evolution is **end-user conversations**. In production
-these are the real sessions your agent already logs to BigQuery. The team that
-owns the agent provides exactly one thing: the answer key — the **golden Q&A**
-([`eval/eval_spec.json`](eval/eval_spec.json)), `{question, expected_answer}`
-pairs that define a correct response. Everything else derives from it: the judge
-grades against it, and the simulated user is briefed with the same facts so it
-knows when the agent is wrong.
+The signal that drives evolution is **end-user conversations** — the questions
+users ask, the answers the agent gives, and the moments users push back. In
+production these are the real sessions your agent already logs to BigQuery; they
+are the raw material the analysts read to write the skill.
+
+To *grade* those conversations you need ground truth, so the team supplies a
+**golden Q&A** ([`eval/eval_spec.json`](eval/eval_spec.json)) —
+`{question, expected_answer}` pairs the judge scores each answer against. The
+conversations are the experience; the golden Q&A is the answer key that says
+which turns went right.
 
 For the demo we simulate users. The traffic runner ([`run_agent.py`](run_agent.py))
 asks questions the messy way real employees do, and the multi-turn cases push
