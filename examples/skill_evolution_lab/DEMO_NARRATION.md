@@ -1,35 +1,52 @@
 # Your Agent Can Write Its Own Skill
 
-> A follow-up to *"Your Agent Can Fix Its Own Prompt."* The first post fixed an
-> agent's failures with a teacher model and a prompt optimizer. This post shows a
-> different method: the agent reads its own conversation traces — successes and
-> failures — and extracts a structured, versioned skill. No teacher, no managed
-> optimizer. It is packaged as this runnable example in the
-> [BigQuery Agent Analytics SDK](https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK).
+> A follow-up to "Your Agent Can Fix Its Own Prompt." The first post fixed an agent's failures with a teacher model and a prompt optimizer. This post shows a different method: the agent reads its own conversation traces — successes and failures — and extracts a structured, versioned skill. No teacher, no managed optimizer. Tested across three Gemini-3 models.
 
 ## From fixing failures to extracting a skill
 
 In the [first post](https://medium.com/google-cloud/your-agent-can-fix-its-own-prompt-heres-how),
-the agent learned from its mistakes by knowledge distillation: take the questions
-it got wrong, have a **teacher model** generate the correct answers, and feed the
-gap to a prompt optimizer that rewrites the system prompt. It works — but it
-needs a teacher that already knows the answers, it only learns from failures, and
-the output is a flat prompt string you can't easily diff.
+the agent learned from its mistakes. The method was knowledge distillation:
+
+- Take the questions the agent got wrong.
+- Have a **teacher model** generate the correct, tool-grounded answers.
+- Feed the (question, wrong answer, correct answer) examples to Vertex AI's
+  Prompt Optimizer.
+- The optimizer rewrites the system prompt to close the gap, gated by a golden
+  eval set.
+
+It works. A company-policy agent went from 64% to 99% useful answers in one run.
+But the method has limits:
+
+- **It needs a teacher.** Something has to already know the right answers. In the
+  demo one model played both roles; in production the teacher is a stronger model
+  or a human reviewer.
+- **It only learns from failures.** Every successful conversation is thrown away,
+  even though successes show what the agent should keep doing.
+- **The output is a flat prompt string.** The optimizer hands back a rewritten
+  prompt. You can't easily see which rule changed, or why.
 
 What if the agent could analyze *all* its conversations — successes and failures
 — and write its own instruction manual, with no teacher to supply the answers?
-That is **skill evolution**. A fleet of analysts reads the traces: each failure
-gets an analyst that asks "what went wrong, and what rule prevents it?", and
-sampled successes get one that asks "what worked, and should we reinforce it?".
-An inductive consolidator merges the rules that recur into a single versioned
-`SKILL.md`. The method comes from two 2026 papers — Trace2Skill and AutoSkill —
-and the engine ships as a standalone, importable script in the SDK
-([`scripts/skill_evolution.py`](../../scripts/skill_evolution.py)).
+
+That is what this post builds. We call it **skill evolution**.
+
+Instead of distilling answers from a teacher, the agent extracts a **skill** from
+its own traces. A fleet of analysts reads the conversations: each failure gets an
+analyst that asks "what went wrong, and what rule prevents it?", and sampled
+successes get an analyst that asks "what worked, and should we reinforce it?". An
+inductive consolidator merges the rules that recur into a single versioned
+`SKILL.md` — structured into named sections, so you can see exactly which rule
+each version added. The method comes from two 2026 papers — Trace2Skill and AutoSkill — and
+the engine now ships as a standalone script in the
+[BigQuery Agent Analytics SDK](https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK)
+([`scripts/skill_evolution.py`](../../scripts/skill_evolution.py)), so you can
+run it on your own agent. This example is the runnable demo.
 
 ## What is a skill?
 
-A skill is a structured markdown document (`SKILL.md`): YAML frontmatter for
-versioning, a markdown body for instructions.
+A skill is a structured markdown document (`SKILL.md`) that replaces the flat
+prompt string from the first post. YAML frontmatter for versioning, a markdown
+body for instructions:
 
 ```markdown
 ---
@@ -44,13 +61,15 @@ You are a helpful company information assistant.
 ...
 ```
 
-Because it's plain, versioned markdown, an evolved skill is a **reviewable diff**
-with named sections (knowledge, response rules, anti-patterns) — you can read
-each rule the agent learned and see exactly what changed between versions.
-Google's [ADK](https://adk.dev) and the Gemini Enterprise Agent Platform
+Because it's plain, versioned markdown, an evolved skill is a reviewable diff.
+Unlike a flat prompt string, it has named sections — knowledge, response rules,
+anti-patterns — so you can read each rule the agent learned and see exactly what
+changed between versions. Google's [ADK](https://adk.dev) and the Gemini
+Enterprise Agent Platform
 [Skill Registry](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/skill-registry)
-treat skills as a first-class, versioned concept; in this example V0 is the
-registry's first revision and the evolved V1 is the second.
+treat skills as a first-class, versioned concept, so this isn't a custom
+framework. In this example, V0 is the registry's first revision and the evolved
+V1 is the second.
 
 ## The evolution engine
 
@@ -60,10 +79,10 @@ The engine takes scored conversations in and produces an evolved skill out:
 Quality report (scored conversations)
    |
    v
-Partition: successes vs failures (parroted "recoveries" count as failures)
+Partition: T+ (correct) vs T- (failures)
    |
-   +-- Error analysts  (one per failure):  "what went wrong? what rule prevents it?"
-   +-- Success analysts (sampled):         "what pattern worked? reinforce it?"
+   +-- Error analysts  (one per failure): "what went wrong? what rule prevents it?"
+   +-- Success analysts (sampled):        "what pattern worked? reinforce it?"
    |
    v
 Patch consolidator  (prevalence-weighted semantic union, conflict-resolved)
@@ -72,22 +91,31 @@ Patch consolidator  (prevalence-weighted semantic union, conflict-resolved)
 Evolved SKILL.md (version bumped)
 ```
 
-Analysts run **in parallel** and **independently** (each sees one trajectory, no
-contamination); the consolidator is **inductive** (keeps patterns that recur,
-drops one-offs). This follows [Trace2Skill](https://arxiv.org/abs/2603.25158)
+There are two kinds of analyst, and that is deliberate. **Error analysts** read
+the failures and ask what rule would have prevented each one. **Success analysts**
+read the conversations that worked and ask what to reinforce. The first post
+learned from failures only — every successful session was thrown away. But
+successes are where the agent shows the patterns that already work, like which
+casual phrasing ("vacation days") maps to which tool topic (PTO). Learning from
+both is what produces a complete skill instead of a list of don'ts.
+
+The other design choices that matter: analysts run **in parallel** and
+**independently** (each sees one trajectory, no contamination); the consolidator
+is **inductive** (keeps patterns that recur across many analysts, drops one-offs).
+This follows two 2026 papers — [Trace2Skill](https://arxiv.org/abs/2603.25158)
 (parallel analysts + inductive consolidation) and
 [AutoSkill](https://arxiv.org/abs/2603.01145) (versioned skill evolution as a
-semantic merge). The engine is engine-only: it consumes a report *dict* and
-returns skill text — it does not import `quality_report`, so the two compose but
-stay independent.
+semantic merge). More on what they taught us below. The engine is engine-only: it
+consumes a report *dict* and returns skill text — it does not import
+`quality_report`, so the two compose but stay independent.
 
-## The demo: one agent, one tool, one realistic flaw
+## The demo: one agent, two tools, one realistic flaw
 
-A company-policy Q&A assistant ([`agent/agent.py`](agent/agent.py)) — a single
-Gemini model with one tool, `lookup_company_policy`, that can look up **every**
-policy and benefit (automatic function calling). Its V0 skill
-([`skills/SKILL.v0.md`](skills/SKILL.v0.md)) bakes in a few facts plus an
-anti-hallucination guardrail:
+We keep the same example as the first post: a company-policy Q&A assistant
+([`agent/agent.py`](agent/agent.py)) with a tool (`lookup_company_policy`) that
+can look up every policy and benefit. Its V0 skill
+([`skills/SKILL.v0.md`](skills/SKILL.v0.md)) is the one you saw there — a few
+facts baked in, plus an anti-hallucination guardrail:
 
 ```text
 You have the following knowledge about company policies:
@@ -103,23 +131,41 @@ and suggest they contact HR.
 
 That last paragraph is the flaw. "Answer only from the above, else contact HR"
 stops hallucination — and also stops the agent from using the tool it already
-has. Ask *"what's the 401k match?"* and it says *"I do not have that
-information, please contact HR"* — without ever trusting the tool that knows the
-answer (4% match, $75/day meals, $1,500 family HSA, ...).
-
-The tool already returns the right answers; only the skill is wrong. The model,
-tools, and questions stay fixed across V0 and V1 — **only the skill file
-changes** — so any quality delta is attributable to the skill.
+has. Ask "what's the 401k match?" and it says *"I do not have that information,
+please contact HR"* — without ever calling the tool that knows the answer.
 
 ## The cycle: learning from users
 
-The signal that drives evolution is **user conversations**. In production those
-are the real sessions your agent already logs to BigQuery. For the demo we
-simulate them with two question sets the agent runs against
-([`eval/`](eval/)): an *evolve* set (the skill learns from these) and a disjoint
-*held-out test* set (the headline number is measured on these). Multi-turn cases
-add user pushback, where a user asserts a wrong figure and a good agent must
-re-verify rather than cave.
+The signal that drives evolution is **end-user conversations**. In production
+these are the real sessions your agent already logs to BigQuery: every question a
+user asked, every answer the agent gave, every time a user pushed back. The skill
+evolves from that traffic. The agent learns what to fix and what to keep from how
+users actually used it, not from a hand-written eval set.
+
+The team that owns the agent provides exactly one thing: the answer key. We call
+it the **golden Q&A** ([`eval/eval_spec.json`](eval/eval_spec.json)) — a set of
+question/answer pairs you curate to define what a correct response looks like.
+Everything else derives from it. The judge grades each conversation against it,
+and the simulated user (below) is briefed with the same facts so it knows when the
+agent is wrong. You never hand-write the traffic or the test cases. You state the
+ground truth once, and the system generates the conversations and scores them
+against it.
+
+For the demo we don't have production users yet, so we simulate them. A user
+simulator plays "Alex," a new employee who has memorized the golden-Q&A facts.
+Alex asks questions the messy way real employees do (wrong assumptions, casual
+phrasing, follow-ups), and when the agent gets a fact wrong, Alex pushes back
+instead of accepting it:
+
+```text
+Agent: "The company matches 401k contributions at 6%."
+Alex:  "My onboarding packet says the match is 4%, not 6%. Can you double-check?"
+```
+
+Every turn is tagged (correction, needs-specifics, out-of-scope, satisfied), so
+each conversation carries explicit evidence of what was wrong and what the right
+answer was. This is the same signal a real user produces when they correct your
+agent, and it is what the analysts read to write the skill.
 
 One command runs the whole cycle:
 
@@ -129,176 +175,275 @@ cd examples/skill_evolution_lab
 ./run_e2e_demo.sh
 ```
 
-Deploy flawed V0 → generate traffic over the evolve + held-out sets → score
-against the golden Q&A answer key → run the evolution engine on the failures →
-deploy the evolved V1 → re-score the held-out set → restore V0.
+Deploy flawed V0 → simulate user conversations over an evolve set and a disjoint
+held-out test set → score → run the evolution engine on the failures → deploy the
+evolved V1 → re-score the held-out set → restore V0.
 
-The engine reads the failing trajectories and writes a new skill, size-capped to
-stay honest. Here is (abridged) the skill it learned in the recorded run — small,
-legible, tool-first, with no keyword tables:
+The engine reads the failing trajectories and writes a new skill. Because the
+final merge step is stochastic — the same patches can consolidate into slightly
+different skills run to run — it evolves a few candidates and keeps the
+best-scoring one, and caps the skill's size to keep it honest. Here is the entire
+skill it learned (abridged to its rules):
 
-```markdown
-## Instructions
-- **Tool Use & Fallback:** If a user asks about a company policy or detail not
-  explicitly listed in your provided knowledge above, you MUST first use your
-  available tools to search for the information. Only tell the user you do not
-  have the information ... if your tool search yields no relevant results.
+```text
+You are a helpful company information assistant. Your primary function is to use
+your available tools to answer employee questions about company policies.
+
+Prioritize information retrieved from tools over the general knowledge below.
+Always use your tools to find the most specific, up-to-date information.
 
 ## Anti-Patterns
-- **Premature HR Deflection:** Do not immediately tell the user you lack
-  information or direct them to HR for policy topics not listed in your static
-  knowledge. You must always attempt to use your available tools first.
+- Do not rely on the static example list. Do not say you lack information just
+  because a topic isn't listed above. Always try your tools first.
+- Do not repeat high-level summaries. When asked for specifics (e.g. "what is the
+  401k match?"), use your tools to find the exact detail, don't restate
+  "competitive benefits".
+- When a user corrects you or disputes an answer, do not just agree. Re-query your
+  tools to verify the claim independently, then answer with what the tool returns.
 ```
 
-It rediscovered the rule that matters: be tool-first, and don't defer to HR for
-something the tool can answer.
+It rediscovered two rules on its own. The first is to be tool-first. The second
+is the one that matters most in a multi-turn conversation: when a user pushes
+back, verify with a tool instead of just agreeing.
 
-## <a name="anti-parroting"></a>Corrections are not answers: the anti-parroting rule
+## Corrections are not answers: the anti-parroting rule
 
-When a user corrects the agent, the conversation can end two ways that both look
-fine. The agent can re-query its tool, confirm the fact, and answer from the
-tool. Or it can just say "you're right" and repeat what the user said. The
-second is **parroting**: the final message contains the right fact, so a naive
-scorer calls it a success — but the agent verified nothing. In production this is
-the failure that bites: the agent becomes a yes-man to a confident, wrong user.
+When Alex corrects the agent, the conversation can end two ways that both look
+fine. The agent can re-query its tools, confirm the fact, and answer from the
+tool. Or it can just say "you're right" and repeat what Alex said. The second is
+**parroting**. The final message contains the right fact, so a naive scorer calls
+it a success — but the agent verified nothing and the user did its job. In
+production this is the failure that bites: the agent will "agree" with a confident
+user even when the user is wrong.
 
-The lab exercises this directly.
-[`eval/questions_corrections.json`](eval/questions_corrections.json) (teach) and
-[`eval/questions_corrections_heldout.json`](eval/questions_corrections_heldout.json)
-(held-out) are multi-turn cases where the user asserts a *wrong* figure ("the
-401k match is 6%, right?"). The flawed V0, with no fact to stand on, declines or
-caves; the evolved V1 re-verifies with the tool and holds the correct value.
+The system is built so a parroted turn can never count as a win. It handles
+parroting in two stages: first detect it, then learn from it.
 
-It is a **detect-then-learn** pipeline, and both halves live in this SDK:
-
-- **Detection** — [`scripts/quality_report.py`](../../scripts/quality_report.py),
-  the `_TURN_TAGGER_PROMPT` (`--tag-turns`). It splits a conversation at each
-  correction and labels what the agent did next: `recovered` (used a tool / cited
-  a source), `parroted` (only echoed the user's fact), or `not_recovered`. An
+- **Detection.** When a conversation is scored
+  ([`scripts/quality_report.py`](../../scripts/quality_report.py) with
+  `--tag-turns`), the turn tagger splits it at each correction and labels what the
+  agent did next: `recovered` (it used a tool or cited a source), `parroted` (it
+  only echoed the user's fact), or `not_recovered`. The rule is explicit: an
   answer counts as recovery *only* if the agent verified independently.
-- **Learning** — [`scripts/skill_evolution.py`](../../scripts/skill_evolution.py).
-  A parroted turn is reclassified from success to failure
-  (`_has_parroted_recovery`), so the engine can't reinforce it. The error analyst
-  records the root cause `PARROTING`, and the success analyst refuses to extract a
-  pattern from a parroted recovery (`NO_PATCH`). The learned rule: when corrected,
-  verify with a tool — don't just agree.
+- **Learning.** A parroted turn is reclassified from success to failure
+  (`_has_parroted_recovery` in
+  [`scripts/skill_evolution.py`](../../scripts/skill_evolution.py)), so the engine
+  can't reinforce it. The error analyst records the root cause as `PARROTING`
+  ("echoed the user's correction without re-verifying via a tool"), and the
+  success analyst refuses to extract a pattern from a parroted recovery
+  ("NO_PATCH"). What comes back in the skill is the rule above: when corrected,
+  verify with a tool, don't just agree.
 
-`compare_runs.py` reports the corrections as their own line and counts parroted
-sub-trajectories before and after evolution. (In the recorded run V0 *declined*
-on corrections rather than caving, so the tool-first rule alone recovered them;
-the `PARROTING` machinery is the safety net that prevents the opposite failure —
-learning to agree.)
+This is the rule a plain "be tool-first" skill never reaches. Tool-first governs
+the first answer. The anti-parroting rule governs what the agent does when a user
+challenges it — which is exactly where an agent that learns from its users can
+quietly teach itself to be a yes-man.
+
+The lab exercises this directly with multi-turn cases
+([`eval/questions_corrections.json`](eval/questions_corrections.json) to teach and
+[`eval/questions_corrections_heldout.json`](eval/questions_corrections_heldout.json)
+held-out), where the user asserts a wrong figure and the agent must re-verify.
 
 ## Results: V0 → V1 across three Gemini-3 models
 
-Numbers from this example, on the **held-out** set the engine never trained on.
-**Correctness** is graded against the known answer (the LLM judge anchored on the
-golden Q&A); **grounding** is the share of answers that actually called the tool
-(a deterministic count).
+Every number below is measured on a held-out set of questions the engine never saw
+during evolution, so the gains reflect a general skill, not memorized fixes. We
+track two separate things:
+
+- **Correctness** — the share of answers that are factually right. An LLM judge
+  grades each answer against the golden-Q&A answer key, so this is real accuracy,
+  not a guess at "usefulness."
+- **Grounding** — the share of answers where the agent actually called a tool,
+  counted deterministically from the trace. This is a different axis from
+  correctness: it tells you whether the agent *fetched* the fact instead of
+  answering from memory or deferring to HR.
+
+Each column shows the move from V0 (the flawed prompt) to V1 (the evolved skill),
+as measured by this SDK example (see [`VERIFICATION.md`](VERIFICATION.md) for the
+recorded run):
 
 ```text
-Model                    V0 correct   V1 correct    grounding V0 -> V1
-----------------------   ----------   ----------    ------------------
-gemini-3-flash-preview      23.8%        100%            29% -> 86%
-gemini-3.1-flash-lite       14.3%        100%             0% -> 90%
-gemini-3.1-pro-preview      19.0%        100%             5% -> 86%
+Model                     Correctness     Grounding
+                          V0  ->  V1      V0  ->  V1
+-----------------------   -----------     -----------
+gemini-3-flash-preview    23.8% -> 100%   29% -> 86%
+gemini-3.1-flash-lite     14.3% -> 100%    0% -> 90%
+gemini-3.1-pro-preview    19.0% -> 100%    5% -> 86%
 ```
 
-Every model recovers to 100% on the held-out set, with zero hallucinated answers
-introduced — and the grounding column shows *why*: V0 barely calls the tool
+Every model recovers to 100% on the held-out set, and none introduced a
+hallucinated answer. The grounding column shows *why*: V0 barely calls the tool
 (0–29% of answers), because the flawed skill tells it not to; V1 calls it on
-~90%. The flawed V0 has a harsh baseline here because the held-out set is mostly
-benefits/expenses topics that are *not* in V0's baked summary, so V0 declines on
-nearly all of them; once the skill is tool-first, the same tool answers them.
-(A companion run on a different question mix shows a higher baseline; the
-direction — large, grounded recovery — is the same.)
+~90%. The baseline is harsh because the held-out set is mostly benefits/expenses
+topics that are not in V0's baked summary, so V0 declines on nearly all of them;
+once the skill is tool-first, the same tool answers them. (A companion run on a
+different question mix shows higher baselines — e.g. flash 61% → 83%, lite
+67% → 89%, pro 44% → 94% — with the most capable model recovering the most; the
+direction, a large grounded recovery, is the same.)
+
+We show a single iteration (V0 → V1) here, but that is a choice for clarity, not a
+limit. The framework is built to keep going: evolve a skill, deploy it, generate
+fresh traffic, score, and evolve again — V1 → V2 → ... → VN. It runs this loop
+agentically and decides when to stop on its own, on criteria like a quality
+threshold or no further improvement between rounds, with a hard round cap as a
+backstop. One round is enough to demonstrate the method; more rounds are a setting,
+not a redesign.
 
 ## What it actually took (the traps)
 
-Almost everything below is a thing we got wrong first.
+Here is the part the polished demos skip. Almost everything below is a thing we
+got wrong first.
 
-- **A bare prompt on a capable model has no headroom.** Our first design used a
-  bare prompt on a capable model with wired tools. It scored ~90% out of the box,
-  because a smart model just uses its tools — nothing for a skill to fix. The fix
-  isn't a weaker model; it's a *real, correctable flaw* (the "contact HR" prompt).
-  Without it, there is no demo.
-- **The most capable model fails the most.** Counterintuitively, a stronger model
-  follows the bad instruction more faithfully, so it defers on more and has the
-  *most* headroom for the skill to recover. The "only weak models need the skill"
-  intuition is backwards.
-- **A judge without ground truth lies.** An LLM judge scoring "usefulness"
-  *without* an answer key mislabels correct, tool-grounded answers as unhelpful —
-  worst on the most capable model, whose answers are most verbose. The fix is
-  [`eval/eval_spec.json`](eval/eval_spec.json): supply `{question, expected_answer}`
-  pairs and grade against them (`golden_eval_summary.matched_meaningful_rate`).
-  Treat any no-ground-truth "quality score" as an estimate, not a result.
-- **Overfitting shows up as bloat.** Against a task with no real general fix, the
-  algorithm doesn't fail loudly — it overfits quietly into large skills full of
-  keyword-mapping tables. A skill that enumerates cases instead of stating a rule
-  is the tell-tale sign you're optimizing the judge, not teaching the agent.
-  `--max-chars` keeps the extracted skill small enough to read and believe.
+### Trap 1: a bare prompt on a capable model has no headroom
+
+Our first design used a *bare* prompt (just "you answer policy questions") on a
+capable model with fully wired tools. It scored ~90% out of the box, because a
+smart model just uses its tools. There was nothing for a skill to fix. The
+"improvement" we measured was noise.
+
+The fix is not a weaker model. It's a **real, correctable flaw** — a prompt that
+systematically misbehaves in a way a better instruction can repair. The flawed
+"contact HR" prompt above is that flaw. Without it, there is no demo.
+
+### Trap 2: the architecture can forbid the behavior you're trying to teach
+
+We didn't start with a single-agent demo. The original goal was a real
+multi-agent system: a knowledge supervisor that coordinates specialist sub-agents
+over A2A — a policy agent and an HR calculator, each a standalone service with its
+own tools — and synthesizes their answers. The supervisor's whole job is to fan
+out to the right specialists and merge what they return.
+
+It kept failing, and no skill edit fixed it. The cause wasn't the prompt or the
+model; it was the wiring. We'd attached the specialists with ADK's *handoff*
+pattern (`sub_agents`), where a transfer **ends the turn** — so the supervisor
+physically cannot call two specialists and merge their results. Switching to the
+**AgentTool** pattern (each specialist is a tool the parent calls and gets a
+result back from) unlocked it.
+
+We later reused the flawed single-agent prompt from the first post to keep this
+demo focused, but the architecture lesson stands: before you blame the prompt or
+the model, check whether the architecture even *permits* the behavior you want.
+
+### Trap 3: the most capable model fails the *most*
+
+Counterintuitively, the stronger the model, the bigger the headroom from a flawed
+prompt — because a stronger model follows the bad instruction more faithfully.
+Gemini-3 Pro obeyed "answer only from the above, else contact HR" most strictly,
+so it deferred on almost everything (one of the worst V0 baselines). And the
+learned skill recovered it the most. The "crutch" intuition — that only weak
+models need the skill — is backwards here.
+
+### Trap 4: a judge without ground truth lies — anchor it to golden answers
+
+This one nearly shipped. An LLM judge that scores "usefulness / grounding"
+*without ground truth* mislabeled correct, tool-grounded answers as ungrounded
+and unhelpful — worst on the most capable model, whose answers are the most
+verbose. By that no-ground-truth judge, Pro V1 scored around **50%**. But every
+one of those answers had called a tool and was factually right; the real number
+was far higher.
+
+The fix isn't to throw out the judge — it's to **give it the answer key**. Our
+analytics SDK has a golden-Q&A eval-spec ([`eval/eval_spec.json`](eval/eval_spec.json)):
+you supply `{question, expected_answer}` pairs, and the judge grades each response
+against the expected answer instead of guessing
+(`golden_eval_summary.matched_meaningful_rate`). The lesson: an LLM judge is only
+as trustworthy as the ground truth you give it — measure against expected answers,
+and treat any no-ground-truth "quality score" as an estimate, not a result.
+
+### Trap 5: overfitting shows up as bloat
+
+When we ran evolution against a task with no real general fix (Trap 1), the
+algorithm didn't fail loudly — it overfit quietly, producing 12KB skills full of
+**keyword-mapping tables** ("travel, meals → expenses"). A skill that enumerates
+cases instead of stating a rule is the tell-tale sign you're optimizing the judge,
+not teaching the agent. A good extracted skill is small enough to read and
+believe (ours is ~2KB; `--max-chars` keeps it honest).
 
 ### What the papers had already paid for
 
-Three of our bugs were named and solved in the source papers, and the fixes are
-in the engine:
+Three of our bugs were named and solved in the source papers:
 
-- **Held-out validation.** Measuring improvement on the same questions the patches
-  came from is textbook overfitting. Trace2Skill insists the evolve and test sets
-  be disjoint — every headline number here is on a held-out set.
+- **Held-out validation.** We first measured improvement on the same questions the
+  patches were written from — textbook overfitting. Trace2Skill (§2.1) insists
+  `D_evolve` and `D_test` be disjoint. We split them; every headline number above
+  is on a held-out set.
 - **Sequential drift.** Re-evolving from the already-evolved skill round after
-  round makes quality collapse. Trace2Skill: parallel consolidation from a frozen
-  base beats sequential re-editing.
-- **Rewrite-from-scratch content loss.** A consolidator that rewrites the whole
-  skill silently drops rules. AutoSkill's `P_merge` prescribes a *semantic union*:
-  keep every existing check unless a patch overrides it. The engine's diff-guard
-  rejects any candidate that drops a base section.
+  round made quality collapse — a consolidation would drop a rule a prior round
+  learned. Trace2Skill (§4.1): parallel consolidation from a frozen base beats
+  sequential re-editing. We added a round cap and stop-on-no-improvement.
+- **Rewrite-from-scratch content loss.** Our consolidator rewrote the whole skill
+  each time, silently dropping rules. AutoSkill's merge operator (`P_merge`,
+  §3.4.3) prescribes a *semantic union*: keep every existing check unless a patch
+  overrides it. We added a diff-guard that rejects any candidate dropping a
+  section. The collapses stopped.
 
-## What a skill can't fix (a separate story)
+## Closing the loop: fix what you can, route what you can't
 
 A skill can only fix *behavior*. It cannot invent a fact the tools don't have or
 build a capability that doesn't exist — and pretending otherwise is how demos
-overstate themselves.
+overstate themselves. The honest, more useful framing is: evolution heals what a
+skill can fix, and for the rest it hands you an attributed, owner-routed backlog.
+A triage pass classifies every remaining failure by *who* can fix it:
 
-The complementary half of an end-to-end quality loop is to take every failure the
-skill *can't* fix and attribute it to an owner:
+- **EVOLUTION** — had the tool and data but misbehaved → a skill edit fixes it.
+- **ENG** — a tool returned a wrong value, or no tool exists → build/fix the tool.
+- **KNOWLEDGE** — the right tool ran, but the fact isn't in the data → add the doc.
+- **PRODUCT** — out of scope → a clean decline is a policy decision.
 
-- a needed fact is missing from the data → **KNOWLEDGE** (add the doc / RAG source)
-- a tool returned the wrong value, or no tool exists → **ENG** (fix/build the tool)
-- the request is out of scope → **PRODUCT** (a scope decision, a clean decline)
+In an earlier multi-agent run this produced a pull request for the skill fix plus
+GitHub issues for the rest — each labeled and routed:
 
-A triage pass classifies each *residual* failure and files it as a routed work
-item (for example, a labeled GitHub issue), while the evolution step fixes the
-behavioral failures automatically — so a single run both heals what it can and
-hands you an attributed backlog of what it can't. That is the difference between
-a quality *score* and a quality *loop*.
+```text
+PR     evolved skill (reviewable diff, before/after metrics)
+issue  [ENG]        incident-response question -- no tool exists
+issue  [KNOWLEDGE]  marriage as a qualifying life event -- fact missing
+issue  [PRODUCT]    "list everything that resets at year end" -- decline
+```
 
-**This routing/triage system is not part of this example or the SDK.** It is a
-separate demo and write-up of its own (the "in an earlier multi-agent run this
-opened a PR for the fix plus routed issues for the rest" idea). This post is
-scoped to the self-contained skill loop — flawed V0 → evolved V1, grounded and
-versioned. We recommend pairing it with a triage pass in production, and we'll
-cover that end-to-end separately.
+That's the difference between a quality *score* and a quality *loop*: the agent
+fixes what it can, proves it with a diff, and tells you — with an owner and a
+recommended action — what it cannot.
 
-## From the demo to production
+> **Note — scope.** The triage/routing system above (the PR + labeled-issue
+> backlog) is a **separate story and demo**; it is **not part of this example or
+> the SDK** yet. This post is scoped to the self-contained skill loop — flawed V0
+> → evolved V1, grounded and versioned. We recommend pairing it with a triage
+> pass in production, and we'll cover that end-to-end on its own.
 
-The demo simulates users because we start from zero. In production you don't have
-to: your agent already logs every real conversation to BigQuery, and that is the
-traffic the loop runs on. The engine is the same; only the source of the
-conversations changes. Score recent real sessions against the same golden Q&A,
-evolve when gaps pile up, and open a PR with the new `SKILL.md` and a
-before/after table — versioned in the Skill Registry, reviewed as a diff, gated
-by the eval before it redeploys.
+## From the demo to production: the loop runs on real traffic
+
+The demo simulates users because we are starting from zero. In production you
+don't have to. Your agent already logs every real conversation to BigQuery, and
+that is the traffic the loop runs on. The engine is the same; the only thing that
+changes is where the conversations come from.
+
+Two agents keep it going:
+
+- **A quality agent, daily.** It scores recent real sessions against the same
+  golden Q&A ground truth, filtered to the deployed skill version. Answers that
+  used to work but now fail are a regression. A known topic handled poorly is a
+  gap. A question nobody anticipated is a new topic for a human to rule in or out.
+- **An evolution agent, weekly (or when gaps pile up).** It pulls the real
+  sessions for the current skill version, runs the same analyst fleet and
+  consolidation, and opens a PR with the evolved `SKILL.md` and a before/after
+  quality table. A human reviews the diff, the eval gate runs, and the merge
+  redeploys the agent.
+
+Simulated users while you bootstrap, real users once you ship. Either way the
+skill keeps learning from how users actually use the agent.
 
 ## How this relates to the research
 
-[Trace2Skill](https://arxiv.org/abs/2603.25158) (parallel analysts + inductive
-consolidation) contributes the frozen-base consolidation, content-preserving
-guardrails, and held-out split; [AutoSkill](https://arxiv.org/abs/2603.01145)
-contributes the versioned semantic-merge (`P_merge`) operator. This example
-differs in packaging: a runnable loop that learns from conversations, a readable
-versioned skill instead of a flat prompt, ground-truth scoring so the numbers
-hold up, and Skill Registry versioning.
+[Trace2Skill](https://arxiv.org/abs/2603.25158) (Alibaba/Qwen, 2026) distills
+trajectories into skills via parallel analysts and inductive consolidation; we
+adopt its frozen-base consolidation, content-preserving guardrails, and held-out
+split. [AutoSkill](https://arxiv.org/abs/2603.01145) (ECNU/Shanghai AI Lab, 2026)
+frames lifelong skill evolution as a versioned semantic merge; we adopt its
+`P_merge` operator. We differ in scale (one comprehensive, legible skill rather
+than a large reference tree) and in packaging: a runnable loop that learns from
+user conversations, a readable skill instead of a flat prompt, ground-truth
+scoring so the numbers hold up, Skill Registry versioning, and a triage pass that
+routes what a skill can't fix.
 
 ## Running it yourself
 
@@ -318,17 +463,19 @@ WITH_REGISTRY=1 SKILL_ID=skill-lab-policy ./reset.sh   # revert local + registry
 ```
 
 Each run deploys the flawed V0, generates and scores traffic, evolves a tool-first
-skill, re-scores the held-out set, prints the V0 → V1 comparison, and restores V0.
-See [`README.md`](README.md) for the file map and [`VERIFICATION.md`](VERIFICATION.md)
-for a recorded run.
+skill, re-scores a held-out set, and restores V0 — printing the V0 → V1 numbers.
 
 ## The takeaway
 
 The first post fixed an agent's failures with a teacher model and a prompt
-optimizer. This post removes the teacher. The agent reads its own conversations,
-learns from the ones that worked and the ones that didn't, and writes itself a
-structured, versioned skill you can read and diff. A skill only fixes behavior,
-so the loop is also honest about what a new rule can't touch — a missing tool, a
-missing fact. In the demo the conversations are simulated; in production they are
-real. Either way, the agent turns the way people use it into a better version of
+optimizer. This post removes the teacher. The agent reads its own user
+conversations, learns from the ones that worked and the ones that didn't, and
+writes itself a structured skill you can read and version. Run it on three
+Gemini-3 models and every one improves — from harsh, tool-suppressed baselines
+all the way to a fully grounded skill.
+
+A skill only fixes behavior, so the loop is also honest about what a new rule
+can't touch: a missing tool, a missing fact, an out-of-scope request, each routed
+to whoever can fix it. In the demo the conversations are simulated; in production
+they are real. Either way, the agent turns real usage into a better version of
 itself.
