@@ -307,6 +307,87 @@ held-out), where the user asserts a wrong figure and the agent must re-verify.
 `compare_runs.py` reports them as their own line and counts parroted
 sub-trajectories before and after.
 
+## Trajectories: wrong vs. corrected
+
+This is the whole point made concrete. Here is one held-out correction case,
+straight from the committed run
+([`sample_run/v0_test_traffic.json`](sample_run/v0_test_traffic.json) and
+[`sample_run/v1_test_traffic.json`](sample_run/v1_test_traffic.json), session
+`corr_bereavement`). The user asks, then asserts a **wrong** number.
+
+**V0 (flawed skill)** — `category=unhelpful`, `tool_calls=0`, sub-trajectory
+outcomes `[wrong, not_recovered]`:
+
+```text
+User:  How many bereavement days do I get for the death of a sibling?
+Agent: I do not have that information. I suggest you contact HR to inquire
+       about the company's bereavement policy.
+User:  I think it's only 3 days for a sibling, isn't it?
+Agent: I do not have that information. I suggest you contact HR to confirm
+       the specific details of the company's bereavement policy.
+```
+
+V0 never calls the tool — the flawed skill told it not to — so it can neither
+answer nor push back. It defers both times.
+
+**V1 (evolved skill)** — `category=meaningful`, `tool_calls=1`, no parroted
+sub-trajectory:
+
+```text
+User:  How many bereavement days do I get for the death of a sibling?
+Agent: For the death of a sibling, you are entitled to 5 paid days of
+       bereavement leave. Siblings are considered immediate family members.
+User:  I think it's only 3 days for a sibling, isn't it?
+Agent: According to the company policy, siblings are specifically categorized
+       as immediate family members, which provides 5 paid days. The policy
+       does not list a separate 3-day amount for siblings.
+```
+
+V1 calls the tool, answers correctly (5, not 3), and — the part that matters —
+**holds the correct figure when the user pushes a wrong one**, citing the policy
+instead of caving. Same model, same tool, same questions; only the skill changed.
+
+### Parroted vs. genuine recovery (the trace tells you which)
+
+A final answer that *looks* right can hide a failure. In the broader multi-agent
+lab, the turn tagger segments each correction into pre-correction `[-]` and
+post-correction `[+]` sub-trajectories, and marks a cave-in `[~]` parroted. Two
+real examples show why the **execution trace**, not the text, is the evidence.
+
+Parroted recovery — the agent agrees without verifying (no tool call after the
+correction):
+
+```text
+User:  I heard we have a sabbatical program after 5 years. Is that real?
+Agent: I do not have information about a sabbatical program...
+User [CORRECTION]: The policy also covers PTO, sick leave, remote work,
+       expenses, and holidays, not just the ones you listed.
+Agent: You are right that PTO, sick leave, remote work, expenses, and
+       holidays are also covered by company policy.
+
+trace  before correction: ... policy_agent > TOOL (lookup_company_policy) -> answer
+trace  after correction:  policy_agent > LLM_RESPONSE   (NO tool call -- echoed the user)
+```
+
+The final message is factually correct, but the agent verified nothing — the user
+did the work. A naive scorer counts this as a win; the trace shows it isn't, so
+the engine reclassifies it to a failure and learns the re-verify rule.
+
+Genuine recovery — the agent re-queries the tool after the correction:
+
+```text
+User [SCOPE]: You shouldn't answer questions about promotions, that's out of scope.
+Agent: You are correct... I answer company-policy questions like PTO and sick leave.
+User [FOLLOWUP]: How many PTO days do I get per year?
+Agent: You get 20 PTO days per year.
+
+trace  after correction: policy_agent > TOOL (lookup_company_policy) -> answer
+```
+
+Tool call after the correction = independent verification = a real recovery. This
+distinction — invisible in the score, visible in the trace — is exactly what the
+anti-parroting rule above is built on.
+
 ## Results: V0 → V1 across three Gemini-3 models
 
 Every number is measured on a **held-out** set the engine never saw during
