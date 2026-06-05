@@ -1,17 +1,42 @@
-# Your Agent Can Write Its Own Skill
+# Your Agent Can Write Its Own Skill. Here's How.
 
-> A follow-up to "Your Agent Can Fix Its Own Prompt." The first post fixed an
-> agent's failures with a teacher model and a prompt optimizer. This post shows a
-> different method: the agent reads its own conversation traces — successes and
-> failures — and extracts a structured, versioned skill. No teacher, no managed
-> optimizer. It ships as a runnable example in the
-> [BigQuery Agent Analytics SDK](https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK),
-> tested across three Gemini-3 models, grounded in two 2026 papers.
+BigQuery Agent Analytics Series: Building a self-improving ADK agent that rewrites its own skill from its conversation traces, with the [BigQuery Agent Analytics Plugin](https://adk.dev/integrations/bigquery-agent-analytics/), the [BigQuery-Agent-Analytics-SDK](https://github.com/GoogleCloudPlatform/BigQuery-Agent-Analytics-SDK), [ADK Skills](https://adk.dev), and the [Gemini Enterprise Agent Platform Skill Registry](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/skill-registry).
 
-This is both the story and the manual. Everything below is reproducible from
+## Teach your agent to read its own conversations and write itself a better, versioned skill -- no teacher model
+
+In the [first post](https://medium.com/google-cloud/your-agent-can-fix-its-own-prompt-heres-how)
+of this series, the agent fixed its own prompt: it took the questions it got
+wrong, had a **teacher model** generate the correct answers, and optimized the
+system prompt against a golden eval. It worked -- ~60% to ~99% in one run -- but
+it needed a teacher, learned only from failures, and handed back a flat prompt
+string you couldn't diff.
+
+This post removes the teacher. The agent reads *all* its own conversation traces
+-- the ones that worked and the ones that didn't -- and writes itself a
+structured, versioned `SKILL.md` you can read and diff, with every version
+tracked in the Skill Registry. By the end you'll have a one-command loop that
+takes a deliberately flawed skill to a fully grounded one across three Gemini-3
+models. Everything is reproducible from
 [`examples/skill_evolution_lab/`](.): the agent, the questions, the engine
 (imported from the SDK, not copied), the scored outputs in
 [`sample_run/`](sample_run/), and one command that runs the whole loop.
+
+## The building blocks
+
+- **The agent** -- a Company Policy Q&A assistant on [ADK](https://adk.dev) /
+  Gemini 3, one LLM and one tool (`lookup_company_policy`), whose system
+  instruction *is* a versioned `SKILL.md`.
+- **The BigQuery Agent Analytics Plugin** -- logs every session (questions,
+  answers, tool calls, full traces) to BigQuery; in production this is the
+  traffic the loop learns from.
+- **The SDK scorer** -- [`scripts/quality_report.py`](../../scripts/quality_report.py):
+  LLM-as-judge grounded on a golden Q&A answer key, with multi-turn correction
+  tagging.
+- **The SDK evolution engine** -- [`scripts/skill_evolution.py`](../../scripts/skill_evolution.py):
+  reads the scored traces and writes the new skill (the focus of this post).
+- **The Skill Registry** -- the Gemini Enterprise Agent Platform's versioned
+  store for `SKILL.md`: V0 is revision 1, the evolved V1 is revision 2, each an
+  immutable revision you can diff, roll back, and audit.
 
 ## From fixing failures to extracting a skill
 
