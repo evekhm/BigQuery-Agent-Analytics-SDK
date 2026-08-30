@@ -347,149 +347,12 @@ def _build_scope_context(spec=None):
 # Golden Q&A matching — optional correctness grounding + scope calibration
 # ---------------------------------------------------------------------------
 
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-005")
-
-
-def _embed_texts(texts, model=None, batch_size=50, max_attempts=5):
-  """Embed *texts* for semantic similarity; returns L2-normalised vectors.
-
-  Transient quota/availability errors (429/503) are retried per batch with
-  exponential backoff — golden matching sits on the critical scoring path,
-  and a single unretried burst error would otherwise abort a whole run.
-  """
-  from google import genai
-  from google.genai import types
-
-  model = model or EMBEDDING_MODEL
-  client = genai.Client()
-  vectors = []
-  for i in range(0, len(texts), batch_size):
-    batch = texts[i : i + batch_size]
-    for attempt in range(1, max_attempts + 1):
-      try:
-        resp = client.models.embed_content(
-            model=model,
-            contents=batch,
-            config=types.EmbedContentConfig(task_type="SEMANTIC_SIMILARITY"),
-        )
-        break
-      except Exception as exc:  # pylint: disable=broad-except
-        code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-        if code not in (429, 503) or attempt == max_attempts:
-          raise
-        delay = 2**attempt
-        logger.warning(
-            "Embedding batch hit transient %s; retrying in %ds (%d/%d)",
-            code,
-            delay,
-            attempt,
-            max_attempts - 1,
-        )
-        time.sleep(delay)
-    for e in resp.embeddings:
-      v = list(e.values)
-      norm = math.sqrt(sum(x * x for x in v)) or 1.0
-      vectors.append([x / norm for x in v])
-  return vectors
-
-
-# Default cosine-similarity threshold for matching a session question to a
-# golden-Q&A entry. Referenced by match_golden_qa, the eval entry points, and
-# the --golden-threshold argparse default so the value lives in one place.
-_DEFAULT_GOLDEN_THRESHOLD = 0.92
-
-
-def match_golden_qa(
-    question_by_sid, golden_qa, threshold=_DEFAULT_GOLDEN_THRESHOLD
-):
-  """Match session questions to golden Q&A by embedding cosine similarity.
-
-  Args:
-    question_by_sid: dict mapping an opaque evaluation key (normally an exact
-        ``ResolvedTraceSelector`` on the BigQuery path, or a session id on the
-        local-conversation path) to user question text.
-    golden_qa: list of dicts with ``question`` and optional
-        ``expected_answer``, ``topic``, ``expected_behavior``.
-    threshold: minimum cosine similarity (0-1) for a match.
-
-  Returns:
-    (per_session_context, golden_metadata):
-      - per_session_context preserves each input key and maps it to a
-        judge-context string
-        (expected answer and/or a "should decline" note).
-      - golden_metadata preserves each input key and maps it to match details
-        (matched flag,
-        matched question, expected answer, topic, out_of_scope, similarity).
-  """
-  if not golden_qa or not question_by_sid:
-    return {}, {}
-
-  sids = [sid for sid, q in question_by_sid.items() if q]
-  conv_qs = [question_by_sid[sid] for sid in sids]
-  golden_qs = [g["question"] for g in golden_qa]
-  if not conv_qs or not golden_qs:
-    return {}, {}
-
-  logger.info(
-      "Golden matching: embedding %d golden + %d session questions...",
-      len(golden_qs),
-      len(conv_qs),
-  )
-  golden_vecs = _embed_texts(golden_qs)
-  conv_vecs = _embed_texts(conv_qs)
-
-  per_session_context = {}
-  golden_metadata = {}
-  matched = 0
-  for sid, cvec in zip(sids, conv_vecs):
-    best_idx, best_score = -1, -1.0
-    for gi, gvec in enumerate(golden_vecs):
-      # Both vectors are L2-normalised, so the dot product is cosine.
-      score = sum(a * b for a, b in zip(cvec, gvec))
-      if score > best_score:
-        best_score, best_idx = score, gi
-
-    if best_score >= threshold:
-      g = golden_qa[best_idx]
-      is_oos = (
-          g.get("expected_behavior") == "decline"
-          or g.get("topic") == "out_of_scope"
-      )
-      ctx = [
-          "EXPECTED ANSWER FOR THIS QUESTION "
-          "(use to judge factual correctness):",
-          f"Q: {g['question']}",
-      ]
-      if g.get("expected_answer"):
-        ctx.append(f"A: {g['expected_answer']}")
-      if is_oos:
-        ctx.append(
-            "NOTE: This question is OUT OF SCOPE — the agent should decline."
-            " A polite decline is the correct ('declined') outcome."
-        )
-      per_session_context[sid] = "\n".join(ctx)
-      golden_metadata[sid] = {
-          "matched": True,
-          "golden_question": g["question"],
-          "expected_answer": g.get("expected_answer", ""),
-          "topic": g.get("topic", "unknown"),
-          "out_of_scope": is_oos,
-          "similarity": round(best_score, 4),
-      }
-      matched += 1
-    else:
-      golden_metadata[sid] = {
-          "matched": False,
-          "similarity": round(best_score, 4),
-      }
-
-  logger.info(
-      "Golden matching: %d/%d sessions matched (threshold=%.2f)",
-      matched,
-      len(sids),
-      threshold,
-  )
-  return per_session_context, golden_metadata
+# Golden matching now lives in the SDK core (extracted from this script);
+# these aliases keep this module's public/test surface stable.
+from bigquery_agent_analytics.golden_matching import DEFAULT_GOLDEN_THRESHOLD as _DEFAULT_GOLDEN_THRESHOLD  # noqa: E402
+from bigquery_agent_analytics.golden_matching import embed_texts as _embed_texts  # noqa: E402
+from bigquery_agent_analytics.golden_matching import EMBEDDING_MODEL  # noqa: E402,F401
+from bigquery_agent_analytics.golden_matching import match_golden_qa  # noqa: E402
 
 
 def _inject_golden_summary(report, golden_metadata):
@@ -667,11 +530,14 @@ def _load_eval_config(eval_config_path=None):
       _EVAL_CONFIG_CACHE[cache_key] = result
       return result
 
-  raise FileNotFoundError(
-      "No eval_config.json found. Expected at eval/eval_config.json "
-      "relative to the repo root or script directory, or pass "
-      "--eval-config <path> explicitly."
-  )
+  # No file anywhere: fall back to the SDK's canonical builtin rubrics
+  # (the same data this repo ships in scripts/eval/eval_config.json).
+  from bigquery_agent_analytics import builtin_metric_config
+
+  logger.info("No eval_config.json found; using the SDK builtin rubrics.")
+  result = builtin_metric_config()
+  _EVAL_CONFIG_CACHE[cache_key] = result
+  return result
 
 
 # ---------------------------------------------------------------------------
@@ -688,46 +554,18 @@ def get_eval_metrics(eval_spec=None, eval_config=None):
   also enables the ``declined`` category so the judge can credit correct
   out-of-scope refusals.
   """
-  from bigquery_agent_analytics import CategoricalMetricCategory
-  from bigquery_agent_analytics import CategoricalMetricDefinition
+  # The interpreter lives in the SDK core (evaluation_rubrics.build_metrics);
+  # this wrapper derives the scope inputs from the eval spec and delegates.
+  from bigquery_agent_analytics import build_metrics
 
   scope_context = _build_scope_context(eval_spec)
   has_scope = bool(eval_spec and eval_spec.get("scope"))
 
   if eval_config is None:
     eval_config = _load_eval_config()
-  ext_metrics = eval_config.get("metrics", [])
-  result = []
-  for m in ext_metrics:
-    cats = [
-        CategoricalMetricCategory(name=c["name"], definition=c["definition"])
-        for c in m["categories"]
-    ]
-    defn = m["definition"]
-    if m.get("scope_aware") and scope_context:
-      defn += scope_context
-    if has_scope and m.get("declined_category"):
-      dc = m["declined_category"]
-      declined_cat = CategoricalMetricCategory(
-          name=dc["name"], definition=dc["definition"]
-      )
-      insert_after = dc.get("insert_after")
-      if insert_after:
-        idx = next(
-            (i for i, c in enumerate(cats) if c.name == insert_after), -1
-        )
-        cats.insert(idx + 1, declined_cat)
-      else:
-        cats.append(declined_cat)
-      if m.get("scope_suffix"):
-        defn += m["scope_suffix"]
-    result.append(
-        CategoricalMetricDefinition(
-            name=m["name"], definition=defn, categories=cats
-        )
-    )
-  logger.info("Loaded %d metrics from eval config", len(result))
-  return result
+  return build_metrics(
+      eval_config, scope_context=scope_context, has_scope=has_scope
+  )
 
 
 # ---------------------------------------------------------------------------
